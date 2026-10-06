@@ -1,21 +1,45 @@
 import { InstitutionRole, PlatformRole, RoleDefinition } from '../types';
 
 export const PLATFORM_ROLES_CONFIG: Record<PlatformRole, { label: string; description: string }> = {
+  platform_super_admin: {
+    label: 'Platform Super Administrator',
+    description: 'Supreme root authority over the entire ACADEEMIA platform, cloud infrastructure, and global encryption keys.',
+  },
   platform_admin: {
     label: 'Platform Administrator',
-    description: 'Complete root access to all ACADEEMIA platform operations, institutions, billing, and infrastructure.',
+    description: 'Complete operational access to all ACADEEMIA platform operations, institutions, billing, and infrastructure.',
   },
-  platform_staff: {
-    label: 'Platform Staff',
-    description: 'Operational access to manage institution onboarding, support tickets, and platform health.',
+  platform_finance: {
+    label: 'Platform Finance & Billing Lead',
+    description: 'Oversight over platform subscriptions, institutional invoice collections, and merchant accounts.',
+  },
+  platform_sales: {
+    label: 'Platform Growth & Sales',
+    description: 'CRM, prospective institution leads, demo environments, and subscription proposals.',
   },
   platform_support: {
     label: 'Platform Support Engineer',
     description: 'Read-only diagnostics and customer support across institution configurations.',
   },
-  platform_sales: {
-    label: 'Platform Growth & Sales',
-    description: 'CRM, prospective institution leads, demo environments, and subscription proposals.',
+  platform_customer_success: {
+    label: 'Platform Customer Success Manager',
+    description: 'Institution onboarding assistance, adoption metrics, and administrator support.',
+  },
+  platform_marketing: {
+    label: 'Platform Marketing & CMS Lead',
+    description: 'Public portal content, announcements, and marketing blog management.',
+  },
+  platform_hr: {
+    label: 'Platform People Operations',
+    description: 'Internal ACADEEMIA staff assignments and platform operational accounts.',
+  },
+  platform_operations: {
+    label: 'Platform Systems Operations',
+    description: 'Database maintenance, performance monitoring, and compliance telemetry.',
+  },
+  platform_staff: {
+    label: 'Platform Staff Member',
+    description: 'General platform operations, communications, and customer assistance.',
   },
 };
 

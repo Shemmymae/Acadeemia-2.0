@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Building2, Plus, ExternalLink, MapPin, Globe, Users, Shield } from 'lucide-react';
+import { Building2, Plus, ExternalLink, MapPin, Globe, Users, Shield, RefreshCw, AlertCircle } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
-import { tenantStore } from '../../services/tenantStore';
+import { supabaseService } from '../../services/supabaseService';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
@@ -18,6 +18,8 @@ export const PlatformInstitutionsView: React.FC<PlatformInstitutionsViewProps> =
 }) => {
   const { institutions, refreshTenantData } = useTenant();
   const [modalOpen, setModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   // New institution form state
   const [name, setName] = useState('');
@@ -28,40 +30,51 @@ export const PlatformInstitutionsView: React.FC<PlatformInstitutionsViewProps> =
   const [currency, setCurrency] = useState('USD');
   const [primaryColor, setPrimaryColor] = useState('#4f46e5');
 
-  const handleCreateInstitution = (e: React.FormEvent) => {
+  // Authoritative Database Provisioning
+  const handleCreateInstitution = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !code) return;
 
-    tenantStore.createInstitution({
-      name,
-      code: code.toUpperCase(),
-      slug: slug || name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-      custom_domain: customDomain || `${code.toLowerCase()}.acadeemia.edu`,
-      status: 'active',
-      timezone,
-      currency,
-      terminology_config: {
-        grade_label: 'Grade',
-        class_label: 'Class',
-        term_label: 'Term',
-        student_label: 'Student',
-        teacher_label: 'Teacher',
-      },
-      branding_config: {
-        primary_color: primaryColor,
-        accent_color: '#06b6d4',
-        font_family: 'Plus Jakarta Sans',
-        motto: 'Excellence in Learning',
-      },
-    });
+    setIsSubmitting(true);
+    setSubmitError(null);
 
-    refreshTenantData();
-    setModalOpen(false);
-    // Reset form
-    setName('');
-    setCode('');
-    setSlug('');
-    setCustomDomain('');
+    try {
+      // Omit ID: let PostgreSQL generate authoritative UUID
+      await supabaseService.createInstitution({
+        name,
+        code: code.toUpperCase(),
+        slug: slug || name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+        custom_domain: customDomain || `${code.toLowerCase()}.acadeemia.edu`,
+        status: 'active',
+        timezone,
+        currency,
+        terminology_config: {
+          grade_label: 'Grade',
+          class_label: 'Class',
+          term_label: 'Term',
+          student_label: 'Student',
+          teacher_label: 'Teacher',
+        },
+        branding_config: {
+          primary_color: primaryColor,
+          accent_color: '#06b6d4',
+          font_family: 'Plus Jakarta Sans',
+          motto: 'Excellence in Learning',
+        },
+      });
+
+      refreshTenantData();
+      setModalOpen(false);
+      setName('');
+      setCode('');
+      setSlug('');
+      setCustomDomain('');
+    } catch (err: any) {
+      console.error('Institution provisioning error:', err);
+      setSubmitError(err.message || 'Database rejected institution provisioning. Verify platform administrator role.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -73,14 +86,17 @@ export const PlatformInstitutionsView: React.FC<PlatformInstitutionsViewProps> =
             Institutions & Campuses Directory
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Provision independent educational organizations with isolated schemas, campuses, and branding.
+            Provision independent educational organizations with isolated schemas, campuses, and branding in PostgreSQL.
           </p>
         </div>
         <Button
           size="sm"
           variant="primary"
           icon={<Plus className="w-4 h-4" />}
-          onClick={() => setModalOpen(true)}
+          onClick={() => {
+            setSubmitError(null);
+            setModalOpen(true);
+          }}
         >
           Provision New Institution
         </Button>
@@ -88,94 +104,54 @@ export const PlatformInstitutionsView: React.FC<PlatformInstitutionsViewProps> =
 
       {/* Grid of Institutions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {institutions.map((inst) => {
-          const campuses = tenantStore.getCampuses(inst.id);
-          const students = tenantStore.getStudents(inst.id);
-          const sub = tenantStore.getSubscription(inst.id);
-
-          return (
-            <Card key={inst.id} padding="md" className="flex flex-col justify-between space-y-4">
-              <div>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-base shadow-sm"
-                      style={{ backgroundColor: inst.branding_config?.primary_color || '#4f46e5' }}
-                    >
-                      {inst.name.substring(0, 2).toUpperCase()}
-                    </div>
-                    <div>
-                      <h3 className="text-base font-bold text-slate-100">{inst.name}</h3>
-                      <div className="text-xs text-slate-400 font-mono mt-0.5">
-                        Code: <span className="text-slate-200">{inst.code}</span> · {inst.timezone}
-                      </div>
-                    </div>
-                  </div>
-                  <Badge variant="success">Active Tenant</Badge>
-                </div>
-
-                <div className="mt-4 grid grid-cols-3 gap-2 p-3 rounded-lg bg-slate-950/40 border border-slate-800 text-center">
-                  <div>
-                    <div className="text-xs text-slate-400">Campuses</div>
-                    <div className="text-sm font-bold text-white font-mono tabular-nums mt-0.5">
-                      {campuses.length}
-                    </div>
+        {institutions.map((inst) => (
+          <Card key={inst.id} padding="md" className="flex flex-col justify-between space-y-4">
+            <div>
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-base shadow-sm"
+                    style={{ backgroundColor: inst.branding_config?.primary_color || '#4f46e5' }}
+                  >
+                    {inst.name.substring(0, 2).toUpperCase()}
                   </div>
                   <div>
-                    <div className="text-xs text-slate-400">Scholars</div>
-                    <div className="text-sm font-bold text-white font-mono tabular-nums mt-0.5">
-                      {students.length}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-400">Package</div>
-                    <div className="text-xs font-semibold text-indigo-300 mt-1 truncate">
-                      {sub?.package?.name.split(' ')[0] || 'Standard'}
+                    <h3 className="text-base font-bold text-slate-100">{inst.name}</h3>
+                    <div className="text-xs text-slate-400 font-mono mt-0.5">
+                      Code: <span className="text-slate-200">{inst.code}</span> · {inst.timezone}
                     </div>
                   </div>
                 </div>
-
-                {/* Campuses List */}
-                <div className="mt-4 space-y-2">
-                  <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    Campuses ({campuses.length})
-                  </div>
-                  {campuses.map((camp) => (
-                    <div
-                      key={camp.id}
-                      className="flex items-center justify-between p-2 rounded-md bg-slate-900 border border-slate-800 text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span className="text-slate-200 font-medium">{camp.name}</span>
-                        {camp.is_main && (
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/40">
-                            Main HQ
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-slate-500 font-mono">{camp.code}</span>
-                    </div>
-                  ))}
-                </div>
+                <Badge variant="success">Active Tenant</Badge>
               </div>
 
-              {/* Action Buttons */}
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
-                <div className="text-xs text-slate-400 font-mono">
-                  {inst.custom_domain || 'Default domain'}
+              <div className="mt-4 p-3 rounded-lg bg-slate-950/40 border border-slate-800 text-xs text-slate-400 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span>Authoritative UUID:</span>
+                  <span className="font-mono text-indigo-300 font-semibold">{inst.id}</span>
                 </div>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  onClick={() => onEnterWorkspace(inst.id)}
-                >
-                  Enter Workspace
-                </Button>
+                <div className="flex items-center justify-between">
+                  <span>Portal Hostname:</span>
+                  <span className="font-mono text-slate-200">{inst.custom_domain || `${inst.slug}.acadeemia.edu`}</span>
+                </div>
               </div>
-            </Card>
-          );
-        })}
+            </div>
+
+            {/* Action Buttons */}
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
+              <div className="text-xs text-slate-400 font-mono">
+                Currency: {inst.currency}
+              </div>
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => onEnterWorkspace(inst.id)}
+              >
+                Enter Workspace
+              </Button>
+            </div>
+          </Card>
+        ))}
       </div>
 
       {/* Provision Institution Modal */}
@@ -187,6 +163,13 @@ export const PlatformInstitutionsView: React.FC<PlatformInstitutionsViewProps> =
         maxWidth="lg"
       >
         <form onSubmit={handleCreateInstitution} className="space-y-4">
+          {submitError && (
+            <div className="p-3 rounded-lg bg-red-950/40 border border-red-800/60 text-red-200 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           <Input
             label="Institution Name"
             placeholder="e.g. Oakridge Collegiate Institute"
@@ -265,11 +248,23 @@ export const PlatformInstitutionsView: React.FC<PlatformInstitutionsViewProps> =
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-            <Button variant="ghost" size="sm" type="button" onClick={() => setModalOpen(false)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onClick={() => setModalOpen(false)}
+              disabled={isSubmitting}
+            >
               Cancel
             </Button>
-            <Button variant="primary" size="sm" type="submit">
-              Provision Tenant
+            <Button
+              variant="primary"
+              size="sm"
+              type="submit"
+              disabled={isSubmitting}
+              icon={isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : undefined}
+            >
+              {isSubmitting ? 'Provisioning in PostgreSQL...' : 'Provision Tenant'}
             </Button>
           </div>
         </form>

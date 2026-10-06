@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   GraduationCap,
   Plus,
@@ -10,21 +10,28 @@ import {
   AlertCircle,
   Eye,
   X,
-  HeartPulse
+  HeartPulse,
+  Trash2,
+  RefreshCw,
 } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
-import { tenantStore } from '../../services/tenantStore';
+import { supabaseService } from '../../services/supabaseService';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { Modal } from '../../components/ui/Modal';
-import { Student } from '../../types';
+import { AcademicClass, Guardian, Student } from '../../types';
 
 export const StudentManagementView: React.FC = () => {
   const { activeInstitution, activeCampus, campuses } = useTenant();
-  const terminology = activeInstitution.terminology_config;
+
+  const [students, setStudents] = useState<Student[]>([]);
+  const [classes, setClasses] = useState<AcademicClass[]>([]);
+  const [selectedStudentGuardians, setSelectedStudentGuardians] = useState<Guardian[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCampusId, setSelectedCampusId] = useState<string>(activeCampus?.id || '');
@@ -38,9 +45,61 @@ export const StudentManagementView: React.FC = () => {
   const [dateOfBirth, setDateOfBirth] = useState('2010-05-12');
   const [campusId, setCampusId] = useState(campuses[0]?.id || '');
   const [allergies, setAllergies] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const students = tenantStore.getStudents(activeInstitution.id, selectedCampusId || undefined);
-  const classes = tenantStore.getAcademicClasses(activeInstitution.id);
+  // Synchronously sync campusId when campuses load
+  useEffect(() => {
+    if (campuses.length > 0 && !campusId) {
+      setCampusId(campuses[0].id);
+    }
+  }, [campuses, campusId]);
+
+  // Asynchronous read from Supabase
+  const loadStudents = useCallback(async () => {
+    if (!activeInstitution) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [studentList, classList] = await Promise.all([
+        supabaseService.getStudents(activeInstitution.id, selectedCampusId || undefined),
+        supabaseService.getAcademicClasses(activeInstitution.id),
+      ]);
+      setStudents(studentList);
+      setClasses(classList);
+    } catch (err: any) {
+      console.error('Failed to load students from Supabase:', err);
+      setError(err.message || 'Failed to load scholar records from database');
+    } finally {
+      setLoading(false);
+    }
+  }, [activeInstitution?.id, selectedCampusId]);
+
+  useEffect(() => {
+    loadStudents();
+  }, [loadStudents]);
+
+  // Load guardians when student is selected
+  useEffect(() => {
+    if (!activeStudentId) {
+      setSelectedStudentGuardians([]);
+      return;
+    }
+    supabaseService.getGuardiansForStudent(activeStudentId).then((g) => {
+      setSelectedStudentGuardians(g);
+    });
+  }, [activeStudentId]);
+
+  if (!activeInstitution) {
+    return (
+      <div className="p-8 text-center border border-dashed border-slate-800 rounded-xl bg-slate-950/40 space-y-2">
+        <h3 className="text-sm font-semibold text-slate-200">No Active Educational Institution</h3>
+        <p className="text-xs text-slate-400">Select an authorized institution to view scholar records.</p>
+      </div>
+    );
+  }
+
+  const terminology = activeInstitution.terminology_config;
 
   const filteredStudents = students.filter((s) => {
     const q = searchQuery.toLowerCase();
@@ -52,29 +111,61 @@ export const StudentManagementView: React.FC = () => {
     ? students.find((s) => s.id === activeStudentId)
     : null;
 
-  const guardiansForSelected = selectedStudent
-    ? tenantStore.getGuardiansForStudent(selectedStudent.id)
-    : [];
-
-  const handleEnrollStudent = (e: React.FormEvent) => {
+  // Authoritative Database Mutation
+  const handleEnrollStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!firstName || !lastName || !campusId) return;
+    if (!firstName || !lastName || !campusId || !activeInstitution) return;
 
-    tenantStore.createStudent(activeInstitution.id, {
-      campus_id: campusId,
-      first_name: firstName,
-      last_name: lastName,
-      gender,
-      date_of_birth: dateOfBirth,
-      admission_date: new Date().toISOString().split('T')[0],
-      status: 'active',
-      allergies: allergies || undefined,
-    });
+    setIsSubmitting(true);
+    setSubmitError(null);
 
-    setEnrollModalOpen(false);
-    setFirstName('');
-    setLastName('');
-    setAllergies('');
+    try {
+      const codePrefix = activeInstitution.code.substring(0, 3).toUpperCase();
+      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+      const studentNumber = `${codePrefix}-2026-${randomSuffix}`;
+
+      // Omit ID: let PostgreSQL generate authoritative UUID
+      const newStudent = await supabaseService.createStudent({
+        institution_id: activeInstitution.id,
+        campus_id: campusId,
+        student_number: studentNumber,
+        first_name: firstName,
+        last_name: lastName,
+        gender,
+        date_of_birth: dateOfBirth,
+        admission_date: new Date().toISOString().split('T')[0],
+        status: 'active',
+        allergies: allergies || undefined,
+      });
+
+      // Update state with authoritative database row
+      setStudents((prev) => [newStudent, ...prev]);
+      setEnrollModalOpen(false);
+      setFirstName('');
+      setLastName('');
+      setAllergies('');
+    } catch (err: any) {
+      console.error('Enrollment error from database:', err);
+      setSubmitError(err.message || 'Database rejected enrollment. Check Row Level Security permissions.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteStudent = async (studentId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!window.confirm('Are you sure you want to delete this scholar record from the database?')) {
+      return;
+    }
+    try {
+      await supabaseService.deleteStudent(studentId);
+      setStudents((prev) => prev.filter((s) => s.id !== studentId));
+      if (activeStudentId === studentId) {
+        setActiveStudentId(null);
+      }
+    } catch (err: any) {
+      alert(`Database error: ${err.message}`);
+    }
   };
 
   return (
@@ -86,18 +177,45 @@ export const StudentManagementView: React.FC = () => {
             {terminology.student_label} Information System (SIS)
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Institutional unique identifiers, demographics, many-to-many guardian relationships, and longitudinal academic records.
+            Authoritative database scholar records, unique institutional numbers, and campus isolation.
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="primary"
-          icon={<Plus className="w-4 h-4" />}
-          onClick={() => setEnrollModalOpen(true)}
-        >
-          Enroll {terminology.student_label}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />}
+            onClick={() => loadStudents()}
+            disabled={loading}
+          >
+            Refresh
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            icon={<Plus className="w-4 h-4" />}
+            onClick={() => {
+              setSubmitError(null);
+              setEnrollModalOpen(true);
+            }}
+          >
+            Enroll {terminology.student_label}
+          </Button>
+        </div>
       </div>
+
+      {/* Database Error Banner */}
+      {error && (
+        <div className="p-4 rounded-xl bg-red-950/40 border border-red-800/60 text-red-200 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => loadStudents()}>
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
@@ -109,85 +227,101 @@ export const StudentManagementView: React.FC = () => {
             icon={<Search className="w-4 h-4" />}
           />
         </div>
-        <div className="w-full sm:w-64">
+
+        <div className="flex items-center gap-3 w-full sm:w-auto">
           <Select
             value={selectedCampusId}
             onChange={(e) => setSelectedCampusId(e.target.value)}
             options={[
-              { value: '', label: 'All Campuses (Consolidated)' },
+              { value: '', label: 'All Authorized Campuses' },
               ...campuses.map((c) => ({ value: c.id, label: c.name })),
             ]}
           />
         </div>
       </div>
 
-      {/* Students Data Grid */}
-      <Card padding="none">
+      {/* Scholar Roster Table */}
+      <Card className="overflow-hidden border-slate-800 bg-slate-900/60">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-950/60 text-slate-400 border-b border-slate-800 font-semibold uppercase tracking-wider">
+          <table className="w-full text-left text-xs text-slate-300">
+            <thead className="bg-slate-950/70 text-slate-400 border-b border-slate-800 text-[11px] uppercase tracking-wider font-semibold">
               <tr>
                 <th className="px-6 py-3">Institutional ID</th>
                 <th className="px-6 py-3">{terminology.student_label} Name</th>
                 <th className="px-6 py-3">Campus</th>
                 <th className="px-6 py-3">Current {terminology.class_label}</th>
-                <th className="px-6 py-3">Parents / Guardians</th>
                 <th className="px-6 py-3">Status</th>
                 <th className="px-6 py-3 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-850">
-              {filteredStudents.map((stu) => {
-                const camp = campuses.find((c) => c.id === stu.campus_id);
-                const cls = classes.find((cl) => cl.id === stu.current_class_id);
-                const gCount = tenantStore.getGuardiansForStudent(stu.id).length;
+              {loading && students.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-12 text-center text-slate-500">
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-400" />
+                    Querying authoritative PostgreSQL scholar records...
+                  </td>
+                </tr>
+              ) : filteredStudents.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-6 py-10 text-center text-slate-500">
+                    No scholars found in database for the selected campus.
+                  </td>
+                </tr>
+              ) : (
+                filteredStudents.map((stu) => {
+                  const camp = campuses.find((c) => c.id === stu.campus_id);
+                  const cls = classes.find((cl) => cl.id === stu.current_class_id);
 
-                return (
-                  <tr
-                    key={stu.id}
-                    className="hover:bg-slate-850/50 transition-colors cursor-pointer"
-                    onClick={() => setActiveStudentId(stu.id)}
-                  >
-                    <td className="px-6 py-3.5 font-mono text-indigo-300 font-semibold">
-                      {stu.student_number}
-                    </td>
-                    <td className="px-6 py-3.5">
-                      <div className="font-semibold text-slate-100">
-                        {stu.first_name} {stu.last_name}
-                      </div>
-                      <div className="text-[11px] text-slate-400">
-                        {stu.gender} · DOB: {stu.date_of_birth}
-                      </div>
-                    </td>
-                    <td className="px-6 py-3.5 text-slate-300 text-[11px]">
-                      {camp?.name.split('(')[0] || 'Campus'}
-                    </td>
-                    <td className="px-6 py-3.5 text-slate-300">
-                      {cls?.name || 'Grade 10 - Alpha'}
-                    </td>
-                    <td className="px-6 py-3.5">
-                      <span className="text-slate-300 font-medium">
-                        {gCount} {gCount === 1 ? 'Linked Guardian' : 'Linked Guardians'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3.5">
-                      <Badge variant="success">Active</Badge>
-                    </td>
-                    <td className="px-6 py-3.5 text-right">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveStudentId(stu.id);
-                        }}
-                      >
-                        Profile
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
+                  return (
+                    <tr
+                      key={stu.id}
+                      className="hover:bg-slate-850/50 transition-colors cursor-pointer"
+                      onClick={() => setActiveStudentId(stu.id)}
+                    >
+                      <td className="px-6 py-3.5 font-mono text-indigo-300 font-semibold">
+                        {stu.student_number}
+                      </td>
+                      <td className="px-6 py-3.5">
+                        <div className="font-semibold text-slate-100">
+                          {stu.first_name} {stu.last_name}
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          {stu.gender} · DOB: {stu.date_of_birth}
+                        </div>
+                      </td>
+                      <td className="px-6 py-3.5 text-slate-300 text-[11px]">
+                        {camp?.name.split('(')[0] || 'Campus'}
+                      </td>
+                      <td className="px-6 py-3.5 text-slate-300">
+                        {cls?.name || 'Class Assigned'}
+                      </td>
+                      <td className="px-6 py-3.5">
+                        <Badge variant="success">Active</Badge>
+                      </td>
+                      <td className="px-6 py-3.5 text-right">
+                        <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setActiveStudentId(stu.id)}
+                          >
+                            Profile
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-950/30"
+                            onClick={(e) => handleDeleteStudent(stu.id, e)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -199,7 +333,7 @@ export const StudentManagementView: React.FC = () => {
           isOpen={Boolean(selectedStudent)}
           onClose={() => setActiveStudentId(null)}
           title={`${terminology.student_label} Profile: ${selectedStudent.first_name} ${selectedStudent.last_name}`}
-          subtitle={`Institutional ID: ${selectedStudent.student_number} (Isolated to ${activeInstitution.name})`}
+          subtitle={`Authoritative UUID: ${selectedStudent.id}`}
           maxWidth="2xl"
         >
           <div className="space-y-5 text-xs">
@@ -246,55 +380,49 @@ export const StudentManagementView: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h4 className="font-semibold text-slate-200 uppercase tracking-wider text-[11px]">
-                  Authorized Parents & Legal Guardians ({guardiansForSelected.length})
+                  Authorized Parents & Legal Guardians ({selectedStudentGuardians.length})
                 </h4>
                 <span className="text-[10px] text-slate-400 font-mono">Many-to-Many Relationship</span>
               </div>
 
-              <div className="space-y-2">
-                {guardiansForSelected.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex items-start justify-between"
-                  >
-                    <div>
-                      <div className="font-semibold text-slate-100 flex items-center gap-2">
-                        <span>{item.guardian.full_name}</span>
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 uppercase">
-                          {item.guardian.relationship_type}
-                        </span>
-                        {item.isPrimary && (
-                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/40">
-                            Primary
+              {selectedStudentGuardians.length === 0 ? (
+                <p className="text-slate-500 italic p-3 border border-slate-800/60 rounded-lg">
+                  No guardian link records linked to this scholar yet.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {selectedStudentGuardians.map((guardian, idx) => (
+                    <div
+                      key={guardian.id || idx}
+                      className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex items-start justify-between"
+                    >
+                      <div>
+                        <div className="font-semibold text-slate-100 flex items-center gap-2">
+                          <span>{guardian.full_name}</span>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 uppercase">
+                            {guardian.relationship_type}
                           </span>
+                        </div>
+                        <div className="mt-1 text-slate-400 flex items-center gap-3">
+                          <span className="flex items-center gap-1 font-mono">
+                            <Phone className="w-3 h-3" /> {guardian.phone}
+                          </span>
+                          {guardian.email && (
+                            <span className="flex items-center gap-1">
+                              <Mail className="w-3 h-3" /> {guardian.email}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-right space-y-1">
+                        {guardian.is_emergency_contact && (
+                          <div className="text-[10px] text-sky-400 font-medium">✓ Emergency Contact</div>
                         )}
                       </div>
-                      <div className="mt-1 text-slate-400 flex items-center gap-3">
-                        <span className="flex items-center gap-1 font-mono">
-                          <Phone className="w-3 h-3" /> {item.guardian.phone}
-                        </span>
-                        {item.guardian.email && (
-                          <span className="flex items-center gap-1">
-                            <Mail className="w-3 h-3" /> {item.guardian.email}
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-1 text-[11px] text-slate-500">
-                        {item.guardian.address}
-                      </div>
                     </div>
-
-                    <div className="text-right space-y-1">
-                      {item.canPickup && (
-                        <div className="text-[10px] text-emerald-400 font-medium">✓ Pickup Authorized</div>
-                      )}
-                      {item.guardian.is_emergency_contact && (
-                        <div className="text-[10px] text-sky-400 font-medium">✓ Emergency Contact</div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="pt-3 border-t border-slate-800 flex justify-end">
@@ -311,9 +439,16 @@ export const StudentManagementView: React.FC = () => {
         isOpen={enrollModalOpen}
         onClose={() => setEnrollModalOpen(false)}
         title={`Enroll New ${terminology.student_label}`}
-        subtitle={`Generates unique institutional ID for ${activeInstitution.name}`}
+        subtitle={`Generates authoritative UUID in PostgreSQL for ${activeInstitution.name}`}
       >
         <form onSubmit={handleEnrollStudent} className="space-y-4">
+          {submitError && (
+            <div className="p-3 rounded-lg bg-red-950/40 border border-red-800/60 text-red-200 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <Input
               label="First Name"
@@ -366,15 +501,27 @@ export const StudentManagementView: React.FC = () => {
           />
 
           <div className="p-3 rounded-lg bg-indigo-950/30 border border-indigo-800/40 text-xs text-indigo-300">
-            Institutional ID prefix: <span className="font-mono font-bold">{activeInstitution.code.substring(0, 3)}-2026-XXXX</span>. ID is unique across this institution.
+            PostgreSQL will generate a unique UUID and enforce campus RLS policy for this scholar.
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-            <Button size="sm" variant="ghost" type="button" onClick={() => setEnrollModalOpen(false)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              onClick={() => setEnrollModalOpen(false)}
+              disabled={isSubmitting}
+            >
               Cancel
             </Button>
-            <Button size="sm" variant="primary" type="submit">
-              Complete Enrollment
+            <Button
+              size="sm"
+              variant="primary"
+              type="submit"
+              disabled={isSubmitting}
+              icon={isSubmitting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : undefined}
+            >
+              {isSubmitting ? 'Persisting to Database...' : 'Complete Enrollment'}
             </Button>
           </div>
         </form>

@@ -38,14 +38,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
   mobileOpen,
   onCloseMobile,
 }) => {
-  const { mode, activeInstitution, activeCampus, campuses, selectCampus } = useTenant();
+  const { mode, activeInstitution, activeCampus, accessibleCampuses, selectCampus } = useTenant();
   const { isModuleEnabled } = useModules();
-  const { currentUser } = useAuth();
+  const { authUser, appProfile, isSandboxMode } = useAuth();
 
   const handleNavClick = (view: string) => {
     onNavigate(view);
     onCloseMobile();
   };
+
+  const displayName = appProfile?.full_name || authUser?.email || (isSandboxMode ? 'Sandbox Engineer' : 'User');
+  const displayEmail = authUser?.email || (isSandboxMode ? 'sandbox@acadeemia.internal' : '');
 
   return (
     <>
@@ -105,15 +108,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </span>
               </div>
               <div className="mt-1 font-medium text-xs text-slate-200 truncate">
-                {mode === 'platform' ? 'ACADEEMIA Platform Operations' : activeInstitution.name}
+                {mode === 'platform' ? 'ACADEEMIA Platform Operations' : activeInstitution?.name || 'Select Institution'}
               </div>
 
               {/* Campus Selector in Institution Mode */}
-              {mode === 'institution' && (
+              {mode === 'institution' && activeInstitution && (
                 <div className="mt-2 pt-2 border-t border-slate-850/60">
                   <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
                     <span>Campus Scope</span>
-                    <span className="text-slate-400 font-mono">{campuses.length} Campuses</span>
+                    <span className="text-slate-400 font-mono">{accessibleCampuses.length} Campuses</span>
                   </div>
                   <div className="relative">
                     <select
@@ -122,7 +125,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className="w-full text-xs bg-slate-900 border border-slate-800 rounded-md py-1 px-2 text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer appearance-none"
                     >
                       <option value="">All Campuses (Consolidated)</option>
-                      {campuses.map((c) => (
+                      {accessibleCampuses.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.name} {c.is_main ? '★' : ''}
                         </option>
@@ -260,7 +263,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     title="Student Information System"
                   >
                     <GraduationCap className="w-4 h-4 shrink-0" />
-                    {!isCollapsed && <span>{activeInstitution.terminology_config.student_label} Information (SIS)</span>}
+                    {!isCollapsed && <span>{activeInstitution?.terminology_config.student_label || 'Student'} Information (SIS)</span>}
                   </button>
                 )}
 
@@ -390,24 +393,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Bottom User Quick View */}
         <div className="p-3 border-t border-slate-800 bg-slate-950/50">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-800 shrink-0 border border-slate-700">
-              {currentUser.avatar_url ? (
-                <img
-                  src={currentUser.avatar_url}
-                  alt={currentUser.full_name}
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-xs font-bold text-slate-300">
-                  {currentUser.full_name.substring(0, 2).toUpperCase()}
-                </div>
-              )}
+            <div className="w-8 h-8 rounded-full overflow-hidden bg-slate-800 shrink-0 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300">
+              {displayName.substring(0, 2).toUpperCase()}
             </div>
             {!isCollapsed && (
               <div className="truncate flex-1 min-w-0">
-                <div className="text-xs font-medium text-slate-200 truncate">{currentUser.full_name}</div>
-                <div className="text-[10px] text-slate-400 truncate">{currentUser.email}</div>
+                <div className="text-xs font-medium text-slate-200 truncate">{displayName}</div>
+                <div className="text-[10px] text-slate-400 truncate">{displayEmail}</div>
               </div>
             )}
           </div>

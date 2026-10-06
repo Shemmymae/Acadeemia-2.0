@@ -15,7 +15,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onNavigate,
 }) => {
   const [query, setQuery] = useState('');
-  const { institutions, selectInstitution, activeInstitution, mode, setMode } = useTenant();
+  const { accessibleInstitutions, selectInstitution, activeInstitution, mode, setMode } = useTenant();
   const { modules } = useModules();
 
   useEffect(() => {
@@ -49,7 +49,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     { id: 'ai', label: 'ACADEEMIA AI Intelligence Hub', icon: <Sparkles className="w-4 h-4" />, category: 'Navigation', view: 'ai' },
   ];
 
-  const filteredInstitutions = institutions.filter(
+  const filteredInstitutions = accessibleInstitutions.filter(
     (i) => i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q)
   );
 
@@ -153,7 +153,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       onClose();
                     }}
                     className={`w-full flex items-center justify-between px-3 py-2 text-xs text-left rounded-lg transition-colors cursor-pointer ${
-                      activeInstitution.id === inst.id
+                      activeInstitution?.id === inst.id
                         ? 'bg-indigo-950/40 text-indigo-200 border border-indigo-800/40'
                         : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
@@ -162,7 +162,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <div className="font-medium">{inst.name}</div>
                       <div className="text-[11px] text-slate-500 font-mono">{inst.code} · {inst.custom_domain || 'Standard Domain'}</div>
                     </div>
-                    {activeInstitution.id === inst.id && (
+                    {activeInstitution?.id === inst.id && (
                       <span className="text-[10px] text-indigo-400 font-medium px-2 py-0.5 rounded bg-indigo-900/60">
                         Active
                       </span>

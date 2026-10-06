@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Package as PackageIcon, Check, Layers, ShieldCheck, DollarSign, Plus } from 'lucide-react';
-import { tenantStore } from '../../services/tenantStore';
+import React, { useState, useEffect } from 'react';
+import { Package as PackageIcon, Check, Layers, ShieldCheck, DollarSign, Plus, RefreshCw } from 'lucide-react';
+import { supabaseService } from '../../services/supabaseService';
 import { SYSTEM_MODULES } from '../../services/moduleRegistry';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -8,8 +8,28 @@ import { Badge } from '../../components/ui/Badge';
 import { Package } from '../../types';
 
 export const PlatformPackagesView: React.FC = () => {
-  const [packages, setPackages] = useState<Package[]>(() => tenantStore.getPackages());
-  const [activePackageId, setActivePackageId] = useState<string>(packages[0]?.id || '');
+  const [packages, setPackages] = useState<Package[]>([]);
+  const [activePackageId, setActivePackageId] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+
+  const loadPackages = async () => {
+    setLoading(true);
+    try {
+      const data = await supabaseService.getPackages();
+      setPackages(data);
+      if (data.length > 0 && !activePackageId) {
+        setActivePackageId(data[0].id);
+      }
+    } catch (err) {
+      console.warn('Failed to load packages:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadPackages();
+  }, []);
 
   const activePackage = packages.find((p) => p.id === activePackageId) || packages[0];
 
@@ -22,9 +42,18 @@ export const PlatformPackagesView: React.FC = () => {
             Packages, Add-ons & Licensing
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Configure tiered subscription packages, module entitlements, limits, and pricing architecture.
+            Authoritative tiered subscription packages, module entitlements, limits, and pricing architecture from PostgreSQL.
           </p>
         </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />}
+          onClick={() => loadPackages()}
+          disabled={loading}
+        >
+          Refresh Packages
+        </Button>
       </div>
 
       {/* Package Cards Grid */}
@@ -36,7 +65,7 @@ export const PlatformPackagesView: React.FC = () => {
               key={pkg.id}
               padding="lg"
               variant={isSelected ? 'interactive' : 'default'}
-              className={`flex flex-col justify-between transition-all ${
+              className={`flex flex-col justify-between transition-all cursor-pointer ${
                 isSelected ? 'ring-2 ring-indigo-500 bg-slate-900' : 'opacity-90'
               }`}
               onClick={() => setActivePackageId(pkg.id)}
@@ -61,78 +90,58 @@ export const PlatformPackagesView: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Hard Limits Box */}
-                <div className="mt-5 p-3 rounded-lg bg-slate-950/60 border border-slate-800 space-y-2 text-xs">
-                  <div className="font-semibold text-slate-300">Institutional Limits:</div>
+                {/* Resource Limits */}
+                <div className="mt-6 pt-4 border-t border-slate-800 space-y-2 text-xs">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                    Resource Capacities:
+                  </div>
                   <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                    <span className="text-slate-400">Max Scholars:</span>
-                    <span className="text-right text-slate-200">{pkg.limits.max_students}</span>
-                    <span className="text-slate-400">Max Campuses:</span>
-                    <span className="text-right text-slate-200">{pkg.limits.max_campuses}</span>
-                    <span className="text-slate-400">Max Faculty/Staff:</span>
-                    <span className="text-right text-slate-200">{pkg.limits.max_staff}</span>
-                    <span className="text-slate-400">Storage Quota:</span>
-                    <span className="text-right text-slate-200">{pkg.limits.storage_gb} GB</span>
-                  </div>
-                </div>
-
-                {/* Included Module Summary */}
-                <div className="mt-5 space-y-2">
-                  <div className="text-xs font-semibold text-slate-300">
-                    Included Modules ({pkg.included_modules.length}):
-                  </div>
-                  <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-                    {pkg.included_modules.map((modCode) => {
-                      const mod = SYSTEM_MODULES.find((m) => m.code === modCode);
-                      return (
-                        <div
-                          key={modCode}
-                          className="flex items-center gap-2 text-xs text-slate-300"
-                        >
-                          <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                          <span className="truncate">{mod?.name || modCode}</span>
-                        </div>
-                      );
-                    })}
+                    <div className="p-2 rounded bg-slate-950/60 border border-slate-850">
+                      <span className="text-slate-400 block">Max Students</span>
+                      <span className="text-slate-100 font-bold">{pkg.limits?.max_students || 500}</span>
+                    </div>
+                    <div className="p-2 rounded bg-slate-950/60 border border-slate-850">
+                      <span className="text-slate-400 block">Max Campuses</span>
+                      <span className="text-slate-100 font-bold">{pkg.limits?.max_campuses || 2}</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div className="pt-4 mt-6 border-t border-slate-800">
-                <Button
-                  size="sm"
-                  variant={isSelected ? 'primary' : 'outline'}
-                  className="w-full"
-                  onClick={() => setActivePackageId(pkg.id)}
-                >
-                  {isSelected ? 'Package Selected' : 'View Package Details'}
-                </Button>
+              <div className="mt-6 pt-4 border-t border-slate-800 flex items-center justify-between text-xs">
+                <span className="text-slate-400 font-mono text-[11px]">
+                  UUID: {pkg.id.substring(0, 8)}...
+                </span>
+                <span className="text-indigo-400 font-medium">
+                  {isSelected ? '✓ Selected Plan' : 'Click to inspect'}
+                </span>
               </div>
             </Card>
           );
         })}
       </div>
 
-      {/* Module Entitlement Matrix for Selected Package */}
+      {/* Selected Package Module Breakdown */}
       {activePackage && (
-        <Card padding="md">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 gap-2">
+        <Card padding="md" className="space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-100">
-                Module Entitlement Breakdown: {activePackage.name}
-              </h2>
+              <h3 className="text-sm font-bold text-white">
+                Module Entitlements: {activePackage.name}
+              </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Every platform module is either bundled in this base package, available as an add-on, or restricted.
+                Modules bundled in this tier will be permitted by the database RLS entitlement check.
               </p>
             </div>
-            <span className="text-xs font-mono text-indigo-400">
-              {activePackage.included_modules.length} of {SYSTEM_MODULES.length} Modules Included
-            </span>
+            <Badge variant="info">
+              {activePackage.included_modules.length} Modules Included
+            </Badge>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {SYSTEM_MODULES.map((mod) => {
               const isIncluded = activePackage.included_modules.includes(mod.code);
+
               return (
                 <div
                   key={mod.code}

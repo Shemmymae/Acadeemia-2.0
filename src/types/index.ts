@@ -3,10 +3,24 @@
 // ==============================================================================
 
 export type PlatformRole = 
+  | 'platform_super_admin'
   | 'platform_admin' 
-  | 'platform_staff' 
-  | 'platform_support' 
-  | 'platform_sales';
+  | 'platform_finance'
+  | 'platform_sales'
+  | 'platform_support'
+  | 'platform_customer_success'
+  | 'platform_marketing'
+  | 'platform_hr'
+  | 'platform_operations'
+  | 'platform_staff';
+
+export interface PlatformMembership {
+  id: string;
+  user_id: string;
+  role: PlatformRole;
+  status: 'active' | 'suspended' | 'revoked';
+  created_at: string;
+}
 
 export type InstitutionRole =
   | 'institution_owner'

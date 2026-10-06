@@ -12,6 +12,8 @@ import { Header } from './components/layout/Header';
 import { CommandPalette } from './components/ui/CommandPalette';
 import { PublicWebsitePreviewModal } from './components/modals/PublicWebsitePreviewModal';
 import { InstitutionWebsitePreviewModal } from './components/modals/InstitutionWebsitePreviewModal';
+import { SupabaseConfigModal } from './components/modals/SupabaseConfigModal';
+import { LoginView } from './views/auth/LoginView';
 
 // Platform Views
 import { PlatformOverviewView } from './views/platform/PlatformOverviewView';
@@ -33,13 +35,14 @@ import { AIIntelligenceHubView } from './views/institution/AIIntelligenceHubView
 import { InstitutionSettingsView } from './views/institution/InstitutionSettingsView';
 
 const AppShell: React.FC = () => {
-  const { mode, setMode, selectInstitution } = useTenant();
+  const { mode, setMode, selectInstitution, activeInstitution } = useTenant();
   const [currentView, setCurrentView] = useState<string>('dashboard');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
   const [publicModalOpen, setPublicModalOpen] = useState<boolean>(false);
   const [schoolModalOpen, setSchoolModalOpen] = useState<boolean>(false);
+  const [supabaseModalOpen, setSupabaseModalOpen] = useState<boolean>(false);
 
   // Derive friendly breadcrumb title
   const getBreadcrumbTitle = () => {
@@ -74,9 +77,11 @@ const AppShell: React.FC = () => {
   };
 
   const handleEnterWorkspace = (instId: string) => {
-    selectInstitution(instId);
-    setMode('institution');
-    setCurrentView('dashboard');
+    const success = selectInstitution(instId);
+    if (success) {
+      setMode('institution');
+      setCurrentView('dashboard');
+    }
   };
 
   return (
@@ -104,6 +109,7 @@ const AppShell: React.FC = () => {
           onToggleMobile={() => setMobileSidebarOpen(true)}
           onPreviewPublicPortal={() => setPublicModalOpen(true)}
           onPreviewSchoolWebsite={() => setSchoolModalOpen(true)}
+          onOpenSupabaseConfig={() => setSupabaseModalOpen(true)}
         />
 
         {/* Viewport Content */}
@@ -169,18 +175,47 @@ const AppShell: React.FC = () => {
         isOpen={schoolModalOpen}
         onClose={() => setSchoolModalOpen(false)}
       />
+
+      {/* Supabase Database Architecture & Diagnostics Modal */}
+      <SupabaseConfigModal
+        isOpen={supabaseModalOpen}
+        onClose={() => setSupabaseModalOpen(false)}
+      />
     </div>
+  );
+};
+
+// Root Router coordinating Authenticated State vs Login Screen
+const RootRouter: React.FC = () => {
+  const { session, isSandboxMode, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3 font-sans">
+        <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+        <span className="text-xs font-mono">Restoring ACADEEMIA 2.0 Security Session...</span>
+      </div>
+    );
+  }
+
+  // Unauthenticated users are strictly held at the Login screen
+  if (!session && !isSandboxMode) {
+    return <LoginView />;
+  }
+
+  return (
+    <TenantProvider>
+      <ModuleProvider>
+        <AppShell />
+      </ModuleProvider>
+    </TenantProvider>
   );
 };
 
 export default function App() {
   return (
-    <TenantProvider>
-      <AuthProvider>
-        <ModuleProvider>
-          <AppShell />
-        </ModuleProvider>
-      </AuthProvider>
-    </TenantProvider>
+    <AuthProvider>
+      <RootRouter />
+    </AuthProvider>
   );
 }

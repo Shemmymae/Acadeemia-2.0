@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Globe, Save, ExternalLink, Check, Eye } from 'lucide-react';
-import { tenantStore } from '../../services/tenantStore';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Globe, Save, Check, Eye, AlertCircle, RefreshCw } from 'lucide-react';
+import { supabaseService } from '../../services/supabaseService';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -14,24 +14,59 @@ export interface PlatformWebsiteCMSViewProps {
 export const PlatformWebsiteCMSView: React.FC<PlatformWebsiteCMSViewProps> = ({
   onPreviewPublicPortal,
 }) => {
-  const [websiteConfig, setWebsiteConfig] = useState<PlatformWebsiteConfig>(() =>
-    tenantStore.getPlatformWebsite()
-  );
-  const [heroTitle, setHeroTitle] = useState(websiteConfig.hero_title);
-  const [heroSubtitle, setHeroSubtitle] = useState(websiteConfig.hero_subtitle);
-  const [domain, setDomain] = useState(websiteConfig.domain);
-  const [isSaved, setIsSaved] = useState(false);
+  const [websiteConfig, setWebsiteConfig] = useState<PlatformWebsiteConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSave = (e: React.FormEvent) => {
+  const [heroTitle, setHeroTitle] = useState('');
+  const [heroSubtitle, setHeroSubtitle] = useState('');
+  const [domain, setDomain] = useState('acadeemia.com');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const loadPlatformWebsite = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await supabaseService.getPlatformWebsite();
+      if (data) {
+        setWebsiteConfig(data);
+        setHeroTitle(data.hero_title || '');
+        setHeroSubtitle(data.hero_subtitle || '');
+        setDomain(data.domain || 'acadeemia.com');
+      }
+    } catch (err: any) {
+      console.error('Failed to load platform website from Supabase:', err);
+      setError(err.message || 'Failed to load platform portal configuration');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPlatformWebsite();
+  }, [loadPlatformWebsite]);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const updated = tenantStore.updatePlatformWebsite({
-      hero_title: heroTitle,
-      hero_subtitle: heroSubtitle,
-      domain,
-    });
-    setWebsiteConfig(updated);
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 2500);
+    setIsSubmitting(true);
+    setSaveError(null);
+    try {
+      const updated = await supabaseService.updatePlatformWebsite({
+        hero_title: heroTitle,
+        hero_subtitle: heroSubtitle,
+        domain,
+      });
+      setWebsiteConfig(updated);
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 2500);
+    } catch (err: any) {
+      console.error('Failed to save platform website in PostgreSQL:', err);
+      setSaveError(err.message || 'Failed to update platform website');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -55,8 +90,30 @@ export const PlatformWebsiteCMSView: React.FC<PlatformWebsiteCMSViewProps> = ({
           >
             Preview Live Public Website
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />}
+            onClick={loadPlatformWebsite}
+          >
+            Refresh
+          </Button>
         </div>
       </div>
+
+      {error && (
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-3 text-rose-300 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {saveError && (
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-3 text-rose-300 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+          <span>{saveError}</span>
+        </div>
+      )}
 
       <form onSubmit={handleSave} className="space-y-6">
         {/* Core Site Settings */}
@@ -79,7 +136,7 @@ export const PlatformWebsiteCMSView: React.FC<PlatformWebsiteCMSViewProps> = ({
               <div className="space-y-1.5">
                 <label className="block text-xs font-semibold text-slate-300">CMS Status</label>
                 <div className="py-2 text-xs text-slate-300 font-mono">
-                  Production Cluster · SSL Active
+                  Production Cluster · PostgreSQL Authoritative
                 </div>
               </div>
             </div>
@@ -110,39 +167,47 @@ export const PlatformWebsiteCMSView: React.FC<PlatformWebsiteCMSViewProps> = ({
                 <Check className="w-4 h-4" /> Changes published live to acadeemia.com!
               </span>
             ) : (
-              <span className="text-xs text-slate-500 font-mono">Unpublished changes will reflect immediately upon saving.</span>
+              <span className="text-xs text-slate-500 font-mono">Direct PostgreSQL mutations with audit logging.</span>
             )}
-            <Button size="sm" variant="primary" type="submit" icon={<Save className="w-4 h-4" />}>
+            <Button
+              size="sm"
+              variant="primary"
+              type="submit"
+              isLoading={isSubmitting}
+              icon={<Save className="w-4 h-4" />}
+            >
               Publish Changes
             </Button>
           </div>
         </Card>
 
         {/* Public Marketing Articles & Thought Leadership */}
-        <Card padding="md">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-100">Featured Thought Leadership Articles</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Articles visible in the public resources directory</p>
-            </div>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            {websiteConfig.blog_articles.map((art, idx) => (
-              <div
-                key={idx}
-                className="p-3 rounded-lg bg-slate-950/40 border border-slate-800 flex items-start justify-between gap-4 text-xs"
-              >
-                <div>
-                  <div className="font-semibold text-slate-200">{art.title}</div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">{art.summary}</div>
-                  <div className="text-[10px] text-slate-500 font-mono mt-1">Slug: /{art.slug} · {art.date}</div>
-                </div>
-                <Badge variant="neutral">Published</Badge>
+        {websiteConfig && websiteConfig.blog_articles && (
+          <Card padding="md">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-100">Featured Thought Leadership Articles</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Articles visible in the public resources directory</p>
               </div>
-            ))}
-          </div>
-        </Card>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {websiteConfig.blog_articles.map((art, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 rounded-lg bg-slate-950/40 border border-slate-800 flex items-start justify-between gap-4 text-xs"
+                >
+                  <div>
+                    <div className="font-semibold text-slate-200">{art.title}</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">{art.summary}</div>
+                    <div className="text-[10px] text-slate-500 font-mono mt-1">Slug: /{art.slug} · {art.date}</div>
+                  </div>
+                  <Badge variant="neutral">Published</Badge>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
       </form>
     </div>
   );

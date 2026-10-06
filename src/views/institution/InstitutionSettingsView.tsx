@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Settings, Save, Building2, Plus, Check } from 'lucide-react';
+import { Settings, Save, Building2, Plus, Check, RefreshCw, AlertCircle } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
-import { tenantStore } from '../../services/tenantStore';
+import { supabaseService } from '../../services/supabaseService';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -12,62 +12,99 @@ export const InstitutionSettingsView: React.FC = () => {
   const { activeInstitution, campuses, refreshTenantData } = useTenant();
 
   // Terminology state
-  const [gradeLabel, setGradeLabel] = useState(activeInstitution.terminology_config.grade_label);
-  const [classLabel, setClassLabel] = useState(activeInstitution.terminology_config.class_label);
-  const [termLabel, setTermLabel] = useState(activeInstitution.terminology_config.term_label);
-  const [studentLabel, setStudentLabel] = useState(activeInstitution.terminology_config.student_label);
-  const [teacherLabel, setTeacherLabel] = useState(activeInstitution.terminology_config.teacher_label);
+  const [gradeLabel, setGradeLabel] = useState(activeInstitution?.terminology_config.grade_label || 'Grade');
+  const [classLabel, setClassLabel] = useState(activeInstitution?.terminology_config.class_label || 'Class');
+  const [termLabel, setTermLabel] = useState(activeInstitution?.terminology_config.term_label || 'Term');
+  const [studentLabel, setStudentLabel] = useState(activeInstitution?.terminology_config.student_label || 'Student');
+  const [teacherLabel, setTeacherLabel] = useState(activeInstitution?.terminology_config.teacher_label || 'Teacher');
 
   // Branding state
-  const [primaryColor, setPrimaryColor] = useState(activeInstitution.branding_config?.primary_color || '#4f46e5');
-  const [motto, setMotto] = useState(activeInstitution.branding_config?.motto || '');
+  const [primaryColor, setPrimaryColor] = useState(activeInstitution?.branding_config?.primary_color || '#4f46e5');
+  const [motto, setMotto] = useState(activeInstitution?.branding_config?.motto || '');
   const [isSaved, setIsSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // New Campus Modal State
   const [campusModalOpen, setCampusModalOpen] = useState(false);
   const [newCampusName, setNewCampusName] = useState('');
   const [newCampusCode, setNewCampusCode] = useState('');
   const [newCampusAddress, setNewCampusAddress] = useState('');
+  const [creatingCampus, setCreatingCampus] = useState(false);
+  const [campusError, setCampusError] = useState<string | null>(null);
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  if (!activeInstitution) {
+    return (
+      <div className="p-8 text-center border border-dashed border-slate-800 rounded-xl bg-slate-950/40 space-y-2">
+        <h3 className="text-sm font-semibold text-slate-200">No Active Educational Institution</h3>
+        <p className="text-xs text-slate-400">Select an authorized institution to customize nomenclature and branding.</p>
+      </div>
+    );
+  }
+
+  // Authoritative Database Update
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    tenantStore.updateInstitution(activeInstitution.id, {
-      terminology_config: {
-        grade_label: gradeLabel,
-        class_label: classLabel,
-        term_label: termLabel,
-        student_label: studentLabel,
-        teacher_label: teacherLabel,
-      },
-      branding_config: {
-        ...activeInstitution.branding_config,
-        primary_color: primaryColor,
-        motto,
-      },
-    });
+    setSaving(true);
+    setError(null);
 
-    refreshTenantData();
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 2500);
+    try {
+      await supabaseService.updateInstitution(activeInstitution.id, {
+        terminology_config: {
+          grade_label: gradeLabel,
+          class_label: classLabel,
+          term_label: termLabel,
+          student_label: studentLabel,
+          teacher_label: teacherLabel,
+        },
+        branding_config: {
+          ...activeInstitution.branding_config,
+          primary_color: primaryColor,
+          motto,
+        },
+      });
+
+      refreshTenantData();
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 2500);
+    } catch (err: any) {
+      console.error('Settings update error:', err);
+      setError(err.message || 'Database rejected settings update');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleCreateCampus = (e: React.FormEvent) => {
+  // Authoritative Database Insert for Campus
+  const handleCreateCampus = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCampusName || !newCampusCode) return;
 
-    tenantStore.createCampus(activeInstitution.id, {
-      name: newCampusName,
-      code: newCampusCode.toUpperCase(),
-      is_main: false,
-      address: newCampusAddress,
-      capacity: 500,
-    });
+    setCreatingCampus(true);
+    setCampusError(null);
 
-    refreshTenantData();
-    setCampusModalOpen(false);
-    setNewCampusName('');
-    setNewCampusCode('');
-    setNewCampusAddress('');
+    try {
+      // Omit ID: let PostgreSQL generate authoritative UUID
+      await supabaseService.createCampus({
+        institution_id: activeInstitution.id,
+        name: newCampusName,
+        code: newCampusCode.toUpperCase(),
+        is_main: false,
+        address: newCampusAddress,
+        capacity: 500,
+      });
+
+      refreshTenantData();
+      setCampusModalOpen(false);
+      setNewCampusName('');
+      setNewCampusCode('');
+      setNewCampusAddress('');
+    } catch (err: any) {
+      console.error('Campus creation error:', err);
+      setCampusError(err.message || 'Database rejected campus creation');
+    } finally {
+      setCreatingCampus(false);
+    }
   };
 
   return (
@@ -84,45 +121,57 @@ export const InstitutionSettingsView: React.FC = () => {
         </div>
       </div>
 
+      {error && (
+        <div className="p-4 rounded-xl bg-red-950/40 border border-red-800/60 text-red-200 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => setError(null)}>
+            Dismiss
+          </Button>
+        </div>
+      )}
+
       <form onSubmit={handleSaveSettings} className="space-y-6">
         {/* Terminology Customization */}
         <Card padding="md">
           <div className="pb-3 border-b border-slate-800">
             <h2 className="text-sm font-semibold text-slate-100">
-              Institutional Nomenclature & Terminology
+              Institutional Terminology Engine (White-Label Nomenclature)
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Customize how academic units and stakeholders are labeled across the system (e.g. British "Form" vs American "Grade", "Scholar" vs "Student").
+              Customize entity labels throughout the UI to reflect your school's educational tradition.
             </p>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-4">
             <Input
-              label="Student Term (e.g. Student, Scholar, Cadet)"
+              label="Student Label (e.g. Scholar, Cadet, Pupil, Researcher)"
               value={studentLabel}
               onChange={(e) => setStudentLabel(e.target.value)}
               required
             />
             <Input
-              label="Teacher Term (e.g. Teacher, Faculty, Instructor)"
+              label="Teacher Label (e.g. Faculty, Instructor, Professor, Tutor)"
               value={teacherLabel}
               onChange={(e) => setTeacherLabel(e.target.value)}
               required
             />
             <Input
-              label="Grade / Level Term (e.g. Grade, Form, Year)"
+              label="Grade / Year Label (e.g. Form, Year Group, Standard)"
               value={gradeLabel}
               onChange={(e) => setGradeLabel(e.target.value)}
               required
             />
             <Input
-              label="Class / Section Term (e.g. Class, Stream, Cohort)"
+              label="Class / Section Label (e.g. Cohort, Stream, Section)"
               value={classLabel}
               onChange={(e) => setClassLabel(e.target.value)}
               required
             />
             <Input
-              label="Term / Session Term (e.g. Term, Trimester, Semester)"
+              label="Academic Term Label (e.g. Trimester, Semester, Term, Quarter)"
               value={termLabel}
               onChange={(e) => setTermLabel(e.target.value)}
               required
@@ -130,139 +179,171 @@ export const InstitutionSettingsView: React.FC = () => {
           </div>
         </Card>
 
-        {/* Branding & Visual Identity */}
+        {/* Branding & Theme Customization */}
         <Card padding="md">
           <div className="pb-3 border-b border-slate-800">
             <h2 className="text-sm font-semibold text-slate-100">
-              Branding & Accent Styling
+              Visual Identity & Institutional Branding
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Primary brand identity applied to navigation badges, reports, and public portals.
+              Colors and heraldic motto reflected across student portals and institutional headers.
             </p>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="flex items-center gap-4">
-              <Input
-                label="Primary Accent Color"
-                type="color"
-                value={primaryColor}
-                onChange={(e) => setPrimaryColor(e.target.value)}
-                className="h-10 w-24 p-1 cursor-pointer"
-              />
-              <div className="text-xs text-slate-400">
-                Hex code: <span className="font-mono text-slate-200">{primaryColor}</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                Primary Brand Color (Hex Code)
+              </label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={primaryColor}
+                  onChange={(e) => setPrimaryColor(e.target.value)}
+                  className="w-10 h-10 rounded-lg cursor-pointer border border-slate-700 bg-slate-900"
+                />
+                <Input
+                  value={primaryColor}
+                  onChange={(e) => setPrimaryColor(e.target.value)}
+                  placeholder="#4f46e5"
+                  className="font-mono text-xs uppercase"
+                  required
+                />
               </div>
             </div>
 
             <Input
-              label="School Motto / Creed"
+              label="Institutional Motto / Crest Inscription"
               value={motto}
               onChange={(e) => setMotto(e.target.value)}
-              placeholder="e.g. Veritas, Libertas, Excellentia"
+              placeholder="e.g. Veritas, Caritas, Excellentia"
             />
           </div>
-
-          <div className="mt-6 flex items-center justify-between pt-4 border-t border-slate-800">
-            {isSaved ? (
-              <span className="text-xs text-emerald-400 flex items-center gap-1.5">
-                <Check className="w-4 h-4" /> Settings updated successfully!
-              </span>
-            ) : (
-              <span className="text-xs text-slate-500 font-mono">
-                Changes apply immediately across all modules.
-              </span>
-            )}
-            <Button size="sm" variant="primary" type="submit" icon={<Save className="w-4 h-4" />}>
-              Save Settings
-            </Button>
-          </div>
         </Card>
+
+        {/* Save Button */}
+        <div className="flex items-center justify-end gap-3 pt-2">
+          {isSaved && (
+            <span className="text-xs text-emerald-400 flex items-center gap-1 font-medium animate-in fade-in">
+              <Check className="w-4 h-4" /> Settings persisted to PostgreSQL database!
+            </span>
+          )}
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={saving}
+            icon={saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          >
+            {saving ? 'Saving to Database...' : 'Persist Institutional Settings'}
+          </Button>
+        </div>
       </form>
 
-      {/* Campus Management Section */}
+      {/* Campus Management */}
       <Card padding="md">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div className="pb-3 border-b border-slate-800 flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-slate-100">
-              Physical & Logical Campuses ({campuses.length})
+              Physical Campuses & Branches ({campuses.length})
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Each institution may operate multiple physical locations with distributed classrooms.
+              Multi-branch operational nodes with database-level isolation.
             </p>
           </div>
           <Button
             size="sm"
-            variant="outline"
+            variant="secondary"
             icon={<Plus className="w-4 h-4" />}
-            onClick={() => setCampusModalOpen(true)}
+            onClick={() => {
+              setCampusError(null);
+              setCampusModalOpen(true);
+            }}
           >
-            Add New Campus
+            Add Campus Branch
           </Button>
         </div>
 
-        <div className="mt-4 space-y-3">
-          {campuses.map((c) => (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-4">
+          {campuses.map((camp) => (
             <div
-              key={c.id}
-              className="p-3 rounded-lg bg-slate-950/40 border border-slate-800 flex items-center justify-between text-xs"
+              key={camp.id}
+              className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1.5"
             >
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-100">{c.name}</span>
-                  {c.is_main && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/40">
-                      Main Campus HQ
-                    </span>
-                  )}
-                </div>
-                <div className="text-[11px] text-slate-400 mt-0.5">
-                  Code: <span className="font-mono">{c.code}</span> · {c.address || 'Address pending'}
-                </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono text-indigo-400 font-semibold">{camp.code}</span>
+                {camp.is_main && (
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/40">
+                    Main Campus
+                  </span>
+                )}
               </div>
-              <div className="text-right text-slate-400 font-mono">
-                Capacity: {c.capacity}
+              <h3 className="text-xs font-bold text-slate-100">{camp.name}</h3>
+              <p className="text-[11px] text-slate-400 line-clamp-1">{camp.address || 'Address not listed'}</p>
+              <div className="text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-850">
+                Capacity: {camp.capacity || 1000} scholars · UUID: {camp.id.substring(0, 8)}...
               </div>
             </div>
           ))}
         </div>
       </Card>
 
-      {/* Add Campus Modal */}
+      {/* New Campus Modal */}
       <Modal
         isOpen={campusModalOpen}
         onClose={() => setCampusModalOpen(false)}
-        title="Add Campus Location"
-        subtitle={`Adds a new physical branch to ${activeInstitution.name}`}
+        title="Add Physical Campus Node"
+        subtitle={`Creates an isolated branch for ${activeInstitution.name} in PostgreSQL`}
       >
         <form onSubmit={handleCreateCampus} className="space-y-4">
+          {campusError && (
+            <div className="p-3 rounded-lg bg-red-950/40 border border-red-800/60 text-red-200 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span>{campusError}</span>
+            </div>
+          )}
+
           <Input
             label="Campus Name"
-            placeholder="e.g. West Lake Preparatory Branch"
+            placeholder="e.g. West Coast Preparatory Campus"
             value={newCampusName}
             onChange={(e) => setNewCampusName(e.target.value)}
             required
           />
+
           <Input
-            label="Campus Code"
-            placeholder="e.g. WEST-03"
+            label="Campus Code (Unique Within Institution)"
+            placeholder="e.g. WEST-02"
             value={newCampusCode}
             onChange={(e) => setNewCampusCode(e.target.value)}
+            className="uppercase font-mono"
             required
           />
+
           <Input
-            label="Street Address & City"
-            placeholder="e.g. 500 Highland Way, Boston, MA"
+            label="Street Address / Location"
+            placeholder="e.g. 500 University Ave, Seattle, WA"
             value={newCampusAddress}
             onChange={(e) => setNewCampusAddress(e.target.value)}
           />
 
           <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-            <Button size="sm" variant="ghost" type="button" onClick={() => setCampusModalOpen(false)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              type="button"
+              onClick={() => setCampusModalOpen(false)}
+              disabled={creatingCampus}
+            >
               Cancel
             </Button>
-            <Button size="sm" variant="primary" type="submit">
-              Create Campus
+            <Button
+              size="sm"
+              variant="primary"
+              type="submit"
+              disabled={creatingCampus}
+              icon={creatingCampus ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : undefined}
+            >
+              {creatingCampus ? 'Creating in Database...' : 'Create Campus'}
             </Button>
           </div>
         </form>

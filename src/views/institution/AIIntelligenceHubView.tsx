@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Sparkles, Shield, Send, CheckCircle2, AlertTriangle, ArrowRight, BrainCircuit } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Sparkles, Send, BrainCircuit, AlertCircle, RefreshCw } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
-import { tenantStore } from '../../services/tenantStore';
+import { supabaseService } from '../../services/supabaseService';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
@@ -9,14 +9,44 @@ import { AIInsight } from '../../types';
 
 export const AIIntelligenceHubView: React.FC = () => {
   const { activeInstitution, activeCampus } = useTenant();
-  const terminology = activeInstitution.terminology_config;
 
-  const [insights, setInsights] = useState<AIInsight[]>(() =>
-    tenantStore.getAIInsights(activeInstitution.id)
-  );
+  const [insights, setInsights] = useState<AIInsight[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [queryInput, setQueryInput] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [queryResult, setQueryResult] = useState<string | null>(null);
+
+  const loadInsights = useCallback(async () => {
+    if (!activeInstitution) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await supabaseService.getAIInsights(activeInstitution.id);
+      setInsights(data);
+    } catch (err: any) {
+      console.error('Failed to load AI insights:', err);
+      setError(err.message || 'Failed to load intelligence telemetry');
+    } finally {
+      setLoading(false);
+    }
+  }, [activeInstitution?.id]);
+
+  useEffect(() => {
+    loadInsights();
+  }, [loadInsights]);
+
+  if (!activeInstitution) {
+    return (
+      <div className="p-8 text-center border border-dashed border-slate-800 rounded-xl bg-slate-950/40 space-y-2">
+        <h3 className="text-sm font-semibold text-slate-200">No Active Educational Institution</h3>
+        <p className="text-xs text-slate-400">Select an authorized institution to run tenant-isolated intelligence queries.</p>
+      </div>
+    );
+  }
+
+  const terminology = activeInstitution.terminology_config;
 
   const presetQueries = [
     `Identify ${terminology.student_label.toLowerCase()}s with attendance or academic drop in Term 1`,
@@ -25,10 +55,20 @@ export const AIIntelligenceHubView: React.FC = () => {
     'Analyze prospective admissions inquiries conversion rate',
   ];
 
-  const handleRunQuery = (q: string) => {
+  const handleRunQuery = async (q: string) => {
     setQueryInput(q);
     setIsProcessing(true);
     setQueryResult(null);
+
+    // Record telemetry audit event to database
+    supabaseService.logAuditEvent({
+      tenant_id: activeInstitution.id,
+      actor_name: 'Authorized User',
+      action: 'AI_QUERY_EXECUTED',
+      entity_type: 'ai_intelligence',
+      entity_id: activeInstitution.id,
+      details: { query: q },
+    });
 
     setTimeout(() => {
       setIsProcessing(false);
@@ -67,8 +107,23 @@ export const AIIntelligenceHubView: React.FC = () => {
           <Badge variant="info">
             RLS Isolated: {activeInstitution.code}
           </Badge>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />}
+            onClick={loadInsights}
+          >
+            Refresh
+          </Button>
         </div>
       </div>
+
+      {error && (
+        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center gap-3 text-rose-300 text-xs">
+          <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+          <span>{error}</span>
+        </div>
+      )}
 
       {/* Query Bar & Presets */}
       <Card padding="md" className="space-y-4 bg-gradient-to-b from-slate-900 to-slate-950">
@@ -141,37 +196,44 @@ export const AIIntelligenceHubView: React.FC = () => {
           Active Institutional Insights & Risk Assessments ({insights.length})
         </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {insights.map((ins) => (
-            <Card key={ins.id} padding="md" className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <span className="text-[10px] font-mono text-indigo-400 uppercase tracking-wider block">
-                    {ins.category} Intelligence
-                  </span>
-                  <h3 className="text-sm font-bold text-white mt-0.5">{ins.title}</h3>
+        {loading ? (
+          <div className="p-8 text-center border border-dashed border-slate-800 rounded-xl bg-slate-950/40">
+            <RefreshCw className="w-5 h-5 text-indigo-400 animate-spin mx-auto mb-2" />
+            <span className="text-xs text-slate-400">Loading intelligence telemetry...</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {insights.map((ins) => (
+              <Card key={ins.id} padding="md" className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-mono text-indigo-400 uppercase tracking-wider block">
+                      {ins.category} Intelligence
+                    </span>
+                    <h3 className="text-sm font-bold text-white mt-0.5">{ins.title}</h3>
+                  </div>
+                  <Badge variant={ins.severity === 'medium' ? 'warning' : 'info'}>
+                    {ins.metric || 'Alert'}
+                  </Badge>
                 </div>
-                <Badge variant={ins.severity === 'medium' ? 'warning' : 'info'}>
-                  {ins.metric || 'Alert'}
-                </Badge>
-              </div>
 
-              <p className="text-xs text-slate-300">{ins.summary}</p>
+                <p className="text-xs text-slate-300">{ins.summary}</p>
 
-              <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-850 text-[11px] text-slate-300">
-                <span className="font-semibold text-indigo-300 block mb-0.5">
-                  Actionable Recommendation:
-                </span>
-                {ins.actionable_recommendation}
-              </div>
+                <div className="p-2.5 rounded-lg bg-slate-950/60 border border-slate-850 text-[11px] text-slate-300">
+                  <span className="font-semibold text-indigo-300 block mb-0.5">
+                    Actionable Recommendation:
+                  </span>
+                  {ins.actionable_recommendation}
+                </div>
 
-              <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-850">
-                <span>Confidence: {Math.round(ins.confidence_score * 100)}%</span>
-                <span>{new Date(ins.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-              </div>
-            </Card>
-          ))}
-        </div>
+                <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 pt-1 border-t border-slate-850">
+                  <span>Confidence: {Math.round(ins.confidence_score * 100)}%</span>
+                  <span>{new Date(ins.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

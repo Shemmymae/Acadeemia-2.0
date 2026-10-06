@@ -1,20 +1,63 @@
-import React, { useState } from 'react';
-import { BookOpen, Calendar, Layers, Users, Plus, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { BookOpen, Calendar, Layers, Users, Plus, CheckCircle2, RefreshCw } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
-import { tenantStore } from '../../services/tenantStore';
+import { supabaseService } from '../../services/supabaseService';
 import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
+import { AcademicClass, AcademicGrade, AcademicTerm, AcademicYear } from '../../types';
 
 export const AcademicStructureView: React.FC = () => {
   const { activeInstitution, activeCampus, campuses } = useTenant();
-  const terminology = activeInstitution.terminology_config;
 
-  const academicYears = tenantStore.getAcademicYears(activeInstitution.id);
+  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
+  const [terms, setTerms] = useState<AcademicTerm[]>([]);
+  const [grades, setGrades] = useState<AcademicGrade[]>([]);
+  const [classes, setClasses] = useState<AcademicClass[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadData = useCallback(async () => {
+    if (!activeInstitution) return;
+    setLoading(true);
+    try {
+      const [ayList, grList, clList] = await Promise.all([
+        supabaseService.getAcademicYears(activeInstitution.id),
+        supabaseService.getAcademicGrades(activeInstitution.id),
+        supabaseService.getAcademicClasses(activeInstitution.id, activeCampus?.id),
+      ]);
+      setAcademicYears(ayList);
+      setGrades(grList);
+      setClasses(clList);
+
+      const activeYear = ayList.find((ay) => ay.is_current) || ayList[0];
+      if (activeYear) {
+        const atList = await supabaseService.getAcademicTerms(activeInstitution.id, activeYear.id);
+        setTerms(atList);
+      } else {
+        setTerms([]);
+      }
+    } catch (err) {
+      console.warn('Academic data load error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [activeInstitution?.id, activeCampus?.id]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  if (!activeInstitution) {
+    return (
+      <div className="p-8 text-center border border-dashed border-slate-800 rounded-xl bg-slate-950/40 space-y-2">
+        <h3 className="text-sm font-semibold text-slate-200">No Active Educational Institution</h3>
+        <p className="text-xs text-slate-400">Select an authorized institution to view academic structures.</p>
+      </div>
+    );
+  }
+
+  const terminology = activeInstitution.terminology_config;
   const activeYear = academicYears.find((ay) => ay.is_current) || academicYears[0];
-  const terms = activeYear ? tenantStore.getAcademicTerms(activeInstitution.id, activeYear.id) : [];
-  const grades = tenantStore.getAcademicGrades(activeInstitution.id);
-  const classes = tenantStore.getAcademicClasses(activeInstitution.id, activeCampus?.id);
 
   return (
     <div className="space-y-6">
@@ -25,9 +68,18 @@ export const AcademicStructureView: React.FC = () => {
             Academic Hierarchy & Curriculum Structure
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Configure Academic Sessions, {terminology.term_label} cycles, {terminology.grade_label} levels, and {terminology.class_label} cohorts.
+            Authoritative academic sessions, {terminology.term_label} cycles, {terminology.grade_label} levels, and {terminology.class_label} cohorts.
           </p>
         </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={<RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />}
+          onClick={() => loadData()}
+          disabled={loading}
+        >
+          Refresh Structure
+        </Button>
       </div>
 
       {/* Academic Year & Terms */}
