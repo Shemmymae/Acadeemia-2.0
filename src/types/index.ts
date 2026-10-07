@@ -85,20 +85,34 @@ export interface Campus {
   code: string;
   is_main: boolean;
   address?: string;
+  city?: string;
+  country?: string;
   phone?: string;
   email?: string;
   capacity: number;
+  status?: 'active' | 'inactive' | 'under_maintenance';
+  principal_name?: string;
+  timezone?: string;
+  created_at?: string;
 }
 
 export interface User {
   id: string;
   email: string;
   full_name: string;
+  first_name?: string;
+  middle_name?: string;
+  last_name?: string;
+  display_name?: string;
   avatar_url?: string;
   phone?: string;
+  preferred_language?: string;
+  timezone?: string;
+  status?: 'active' | 'suspended';
   is_platform_user: boolean;
   platform_role?: PlatformRole;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface InstitutionUser {
@@ -196,6 +210,8 @@ export interface AcademicYear {
   start_date: string;
   end_date: string;
   is_current: boolean;
+  status?: 'active' | 'upcoming' | 'archived';
+  created_at?: string;
 }
 
 export interface AcademicTerm {
@@ -206,6 +222,8 @@ export interface AcademicTerm {
   start_date: string;
   end_date: string;
   is_current: boolean;
+  sequence_order?: number;
+  created_at?: string;
 }
 
 export interface AcademicGrade {
@@ -214,6 +232,8 @@ export interface AcademicGrade {
   name: string;
   code: string;
   sequence_order: number;
+  education_level?: string;
+  created_at?: string;
 }
 
 export interface AcademicClass {
@@ -225,6 +245,23 @@ export interface AcademicClass {
   name: string;
   code: string;
   capacity: number;
+  stream?: string;
+  created_at?: string;
+  campus?: Campus;
+  grade?: AcademicGrade;
+  academic_year?: AcademicYear;
+}
+
+export interface Subject {
+  id: string;
+  institution_id: string;
+  code: string;
+  name: string;
+  description?: string;
+  education_level?: string;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // Student & Guardian
@@ -245,6 +282,10 @@ export interface Student {
   blood_group?: string;
   allergies?: string;
   created_at: string;
+  campus?: Campus;
+  current_class?: AcademicClass;
+  enrollments?: StudentEnrollment[];
+  student_guardians?: StudentGuardian[];
 }
 
 export interface StudentEnrollment {
@@ -256,6 +297,9 @@ export interface StudentEnrollment {
   enrolled_at: string;
   status: string;
   roll_number?: string;
+  academic_year?: AcademicYear;
+  academic_class?: AcademicClass;
+  campus?: Campus;
 }
 
 export interface Guardian {

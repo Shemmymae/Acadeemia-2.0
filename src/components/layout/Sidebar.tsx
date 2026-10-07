@@ -15,7 +15,10 @@ import {
   ChevronRight,
   TrendingUp,
   Sliders,
-  ChevronDown
+  ChevronDown,
+  UserCheck,
+  Shield,
+  HeartHandshake
 } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
 import { useModules } from '../../context/ModuleContext';
@@ -281,6 +284,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     {!isCollapsed && <span>Academic Structure</span>}
                   </button>
                 )}
+
+                <button
+                  onClick={() => handleNavClick('campuses')}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    currentView === 'campuses'
+                      ? 'bg-indigo-600 text-white font-semibold'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
+                  }`}
+                  title="Campuses & Branches"
+                >
+                  <Building2 className="w-4 h-4 shrink-0" />
+                  {!isCollapsed && <span>Campuses & Branches</span>}
+                </button>
+
+                <button
+                  onClick={() => handleNavClick('guardians')}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    currentView === 'guardians'
+                      ? 'bg-indigo-600 text-white font-semibold'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
+                  }`}
+                  title="Guardians & Family Contacts"
+                >
+                  <HeartHandshake className="w-4 h-4 shrink-0" />
+                  {!isCollapsed && <span>Guardians & Families</span>}
+                </button>
               </div>
 
               {/* Operations & Finance Section */}
@@ -290,6 +319,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     Administration & Finance
                   </div>
                 )}
+
+                <button
+                  onClick={() => handleNavClick('institution-users')}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                    currentView === 'institution-users'
+                      ? 'bg-indigo-600 text-white font-semibold'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
+                  }`}
+                  title="User Directory & Role Assignments"
+                >
+                  <UserCheck className="w-4 h-4 shrink-0" />
+                  {!isCollapsed && <span>Staff & User Roles</span>}
+                </button>
 
                 {isModuleEnabled('fees_collection') && (
                   <button

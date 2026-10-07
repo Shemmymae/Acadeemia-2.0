@@ -14,6 +14,7 @@ export const SupabaseConfigModal: React.FC<SupabaseConfigModalProps> = ({ isOpen
   const { isSupabaseConfigured, isPlatformAdmin, authUser } = useAuth();
   const [copiedSchema, setCopiedSchema] = useState(false);
   const [copiedAdminSql, setCopiedAdminSql] = useState(false);
+  const [copiedSubjectsSql, setCopiedSubjectsSql] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
   const [healthStatus, setHealthStatus] = useState<{
     configured: boolean;
@@ -62,6 +63,55 @@ SET role = 'platform_super_admin'::platform_role, status = 'active';`;
     navigator.clipboard.writeText(sql);
     setCopiedAdminSql(true);
     setTimeout(() => setCopiedAdminSql(false), 2500);
+  };
+
+  const copySubjectsSql = () => {
+    const subjectsSql = `-- ACADEEMIA 2.0 - Phase 4A Subjects Table DDL & RLS Migration
+CREATE TABLE IF NOT EXISTS public.subjects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  institution_id UUID NOT NULL REFERENCES public.institutions(id) ON DELETE CASCADE,
+  code VARCHAR(50) NOT NULL,
+  name VARCHAR(150) NOT NULL,
+  description TEXT,
+  education_level VARCHAR(50),
+  is_active BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(institution_id, code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_subjects_institution ON public.subjects(institution_id);
+
+ALTER TABLE public.subjects ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS subjects_select ON public.subjects;
+CREATE POLICY subjects_select ON public.subjects FOR SELECT
+  USING (
+    public.has_institution_membership(institution_id) 
+    OR public.is_platform_user()
+  );
+
+DROP POLICY IF EXISTS subjects_manage ON public.subjects;
+CREATE POLICY subjects_manage ON public.subjects FOR ALL
+  USING (
+    public.has_institution_role(
+      institution_id, 
+      ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::public.institution_role[]
+    )
+  )
+  WITH CHECK (
+    public.has_institution_role(
+      institution_id, 
+      ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::public.institution_role[]
+    )
+  );
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.subjects TO authenticated;
+GRANT SELECT ON public.subjects TO anon;`;
+
+    navigator.clipboard.writeText(subjectsSql);
+    setCopiedSubjectsSql(true);
+    setTimeout(() => setCopiedSubjectsSql(false), 2500);
   };
 
   const copySchemaFile = async () => {
@@ -307,6 +357,37 @@ WHERE email = '${authUser?.email || 'admin@acadeemia.com'}'
 ON CONFLICT (user_id) DO UPDATE 
 SET role = 'platform_super_admin'::platform_role, status = 'active';`}
           </pre>
+        </div>
+
+        {/* Phase 4A Subjects DDL Migration Helper */}
+        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+          <div className="font-semibold text-white flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <Database className="w-4 h-4 text-amber-400" />
+              <span>Phase 4A: Deploy Subjects Table DDL</span>
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={copySubjectsSql}
+              className="text-xs"
+            >
+              {copiedSubjectsSql ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-400 mr-1" />
+                  Copied Migration SQL!
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5 mr-1" />
+                  Copy Subjects Migration DDL
+                </>
+              )}
+            </Button>
+          </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            If <code className="text-amber-300 font-mono">public.subjects</code> has not yet been executed in your Supabase database, copy this DDL and run it in your Supabase SQL Editor or via migration file <code className="text-slate-300 font-mono">supabase/migrations/20261006000001_create_subjects.sql</code>.
+          </p>
         </div>
 
         {/* Footer actions */}

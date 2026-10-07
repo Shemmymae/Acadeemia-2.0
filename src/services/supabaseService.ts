@@ -24,12 +24,17 @@ import {
   HRStaff,
   Institution,
   InstitutionModule,
+  InstitutionUser,
   InstitutionWebsiteConfig,
   ModuleDefinition,
   Package,
   PlatformWebsiteConfig,
   Student,
+  StudentEnrollment,
+  StudentGuardian,
+  Subject,
   Subscription,
+  User,
 } from '../types';
 
 export class SupabaseService {
@@ -71,7 +76,13 @@ export class SupabaseService {
       'campuses',
       'institution_users',
       'academic_years',
+      'academic_terms',
+      'academic_grades',
+      'academic_classes',
+      'subjects',
       'students',
+      'guardians',
+      'student_guardians',
       'finance_invoices',
       'modules',
       'packages',
@@ -275,6 +286,22 @@ export class SupabaseService {
     return true;
   }
 
+  async updateCampus(id: string, updates: Partial<Campus>): Promise<Campus> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { id, institution_id: '', name: '', code: '', is_main: false, capacity: 1000, ...updates } as Campus;
+    }
+    const { data, error } = await supabase
+      .from('campuses')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) {
+      throw new Error(error?.message || 'Failed to update campus in PostgreSQL');
+    }
+    return data as Campus;
+  }
+
   // ============================================================================
   // ACADEMIC STRUCTURE
   // ============================================================================
@@ -289,6 +316,68 @@ export class SupabaseService {
       .order('start_date', { ascending: false });
     if (error) throw new Error(error.message);
     return (data as AcademicYear[]) || [];
+  }
+
+  async createAcademicYear(data: Omit<AcademicYear, 'id'>): Promise<AcademicYear> {
+    if (!isSupabaseConfigured || !supabase) {
+      const year = { ...data, id: crypto.randomUUID() };
+      return year;
+    }
+    // If setting as current, deactivate others first
+    if (data.is_current) {
+      await supabase
+        .from('academic_years')
+        .update({ is_current: false })
+        .eq('institution_id', data.institution_id);
+    }
+    const { data: newYear, error } = await supabase
+      .from('academic_years')
+      .insert({
+        institution_id: data.institution_id,
+        name: data.name,
+        start_date: data.start_date,
+        end_date: data.end_date,
+        is_current: data.is_current || false,
+      })
+      .select()
+      .single();
+    if (error || !newYear) throw new Error(error?.message || 'Failed to create academic year');
+    return newYear as AcademicYear;
+  }
+
+  async updateAcademicYear(id: string, updates: Partial<AcademicYear>): Promise<AcademicYear> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { id, institution_id: '', name: '', start_date: '', end_date: '', is_current: false, ...updates };
+    }
+    if (updates.is_current && updates.institution_id) {
+      await supabase
+        .from('academic_years')
+        .update({ is_current: false })
+        .eq('institution_id', updates.institution_id)
+        .neq('id', id);
+    }
+    const { data, error } = await supabase
+      .from('academic_years')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) throw new Error(error?.message || 'Failed to update academic year');
+    return data as AcademicYear;
+  }
+
+  async deleteAcademicYear(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return true;
+    const { error } = await supabase.from('academic_years').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
+  }
+
+  async setCurrentAcademicYear(institutionId: string, yearId: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    await supabase.from('academic_years').update({ is_current: false }).eq('institution_id', institutionId);
+    const { error } = await supabase.from('academic_years').update({ is_current: true }).eq('id', yearId);
+    if (error) throw new Error(error.message);
   }
 
   async getAcademicTerms(institutionId: string, academicYearId?: string): Promise<AcademicTerm[]> {
@@ -307,6 +396,67 @@ export class SupabaseService {
     return (data as AcademicTerm[]) || [];
   }
 
+  async createAcademicTerm(data: Omit<AcademicTerm, 'id'>): Promise<AcademicTerm> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { ...data, id: crypto.randomUUID() };
+    }
+    if (data.is_current) {
+      await supabase
+        .from('academic_terms')
+        .update({ is_current: false })
+        .eq('institution_id', data.institution_id);
+    }
+    const { data: newTerm, error } = await supabase
+      .from('academic_terms')
+      .insert({
+        institution_id: data.institution_id,
+        academic_year_id: data.academic_year_id,
+        name: data.name,
+        start_date: data.start_date,
+        end_date: data.end_date,
+        is_current: data.is_current || false,
+      })
+      .select()
+      .single();
+    if (error || !newTerm) throw new Error(error?.message || 'Failed to create academic term');
+    return newTerm as AcademicTerm;
+  }
+
+  async updateAcademicTerm(id: string, updates: Partial<AcademicTerm>): Promise<AcademicTerm> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { id, institution_id: '', academic_year_id: '', name: '', start_date: '', end_date: '', is_current: false, ...updates };
+    }
+    if (updates.is_current && updates.institution_id) {
+      await supabase
+        .from('academic_terms')
+        .update({ is_current: false })
+        .eq('institution_id', updates.institution_id)
+        .neq('id', id);
+    }
+    const { data, error } = await supabase
+      .from('academic_terms')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) throw new Error(error?.message || 'Failed to update academic term');
+    return data as AcademicTerm;
+  }
+
+  async deleteAcademicTerm(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return true;
+    const { error } = await supabase.from('academic_terms').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
+  }
+
+  async setCurrentAcademicTerm(institutionId: string, termId: string): Promise<void> {
+    if (!isSupabaseConfigured || !supabase) return;
+    await supabase.from('academic_terms').update({ is_current: false }).eq('institution_id', institutionId);
+    const { error } = await supabase.from('academic_terms').update({ is_current: true }).eq('id', termId);
+    if (error) throw new Error(error.message);
+  }
+
   async getAcademicGrades(institutionId: string): Promise<AcademicGrade[]> {
     if (!isSupabaseConfigured || !supabase) {
       return tenantStore.getAcademicGrades(institutionId);
@@ -320,20 +470,181 @@ export class SupabaseService {
     return (data as AcademicGrade[]) || [];
   }
 
+  async createAcademicGrade(data: Omit<AcademicGrade, 'id'>): Promise<AcademicGrade> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { ...data, id: crypto.randomUUID() };
+    }
+    const { data: newGrade, error } = await supabase
+      .from('academic_grades')
+      .insert({
+        institution_id: data.institution_id,
+        name: data.name,
+        code: data.code.toUpperCase(),
+        sequence_order: data.sequence_order || 1,
+      })
+      .select()
+      .single();
+    if (error || !newGrade) throw new Error(error?.message || 'Failed to create academic grade');
+    return newGrade as AcademicGrade;
+  }
+
+  async updateAcademicGrade(id: string, updates: Partial<AcademicGrade>): Promise<AcademicGrade> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { id, institution_id: '', name: '', code: '', sequence_order: 1, ...updates };
+    }
+    const { data, error } = await supabase
+      .from('academic_grades')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) throw new Error(error?.message || 'Failed to update academic grade');
+    return data as AcademicGrade;
+  }
+
+  async deleteAcademicGrade(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return true;
+    const { error } = await supabase.from('academic_grades').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
+  }
+
   async getAcademicClasses(institutionId: string, campusId?: string): Promise<AcademicClass[]> {
     if (!isSupabaseConfigured || !supabase) {
       return tenantStore.getAcademicClasses(institutionId, campusId);
     }
     let query = supabase
       .from('academic_classes')
-      .select('*')
+      .select('*, campuses(id, name, code), academic_grades(id, name, code), academic_years(id, name)')
       .eq('institution_id', institutionId);
     if (campusId) {
       query = query.eq('campus_id', campusId);
     }
     const { data, error } = await query.order('name');
     if (error) throw new Error(error.message);
-    return (data as AcademicClass[]) || [];
+    return ((data || []).map((row: any) => ({
+      ...row,
+      campus: row.campuses,
+      grade: row.academic_grades,
+      academic_year: row.academic_years,
+    })) as AcademicClass[]);
+  }
+
+  async createAcademicClass(data: Omit<AcademicClass, 'id'>): Promise<AcademicClass> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { ...data, id: crypto.randomUUID() };
+    }
+    const { data: newClass, error } = await supabase
+      .from('academic_classes')
+      .insert({
+        institution_id: data.institution_id,
+        campus_id: data.campus_id,
+        grade_id: data.grade_id,
+        academic_year_id: data.academic_year_id,
+        name: data.name,
+        code: data.code.toUpperCase(),
+        capacity: data.capacity || 35,
+      })
+      .select()
+      .single();
+    if (error || !newClass) throw new Error(error?.message || 'Failed to create academic class');
+    return newClass as AcademicClass;
+  }
+
+  async updateAcademicClass(id: string, updates: Partial<AcademicClass>): Promise<AcademicClass> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { id, institution_id: '', campus_id: '', grade_id: '', academic_year_id: '', name: '', code: '', capacity: 35, ...updates };
+    }
+    const { data, error } = await supabase
+      .from('academic_classes')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) throw new Error(error?.message || 'Failed to update academic class');
+    return data as AcademicClass;
+  }
+
+  async deleteAcademicClass(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return true;
+    const { error } = await supabase.from('academic_classes').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
+  }
+
+  // ============================================================================
+  // SUBJECTS
+  // ============================================================================
+  async getSubjects(institutionId: string): Promise<Subject[]> {
+    if (!isSupabaseConfigured || !supabase) {
+      return [
+        { id: 'sub-01', institution_id: institutionId, code: 'ENG', name: 'English Language & Literature', is_active: true },
+        { id: 'sub-02', institution_id: institutionId, code: 'MAT', name: 'Mathematics & Calculus', is_active: true },
+        { id: 'sub-03', institution_id: institutionId, code: 'SCI', name: 'Integrated Sciences', is_active: true },
+        { id: 'sub-04', institution_id: institutionId, code: 'HIS', name: 'World History & Civics', is_active: true },
+      ];
+    }
+    try {
+      const { data, error } = await supabase
+        .from('subjects')
+        .select('*')
+        .eq('institution_id', institutionId)
+        .order('name');
+      if (error) {
+        if (error.code === '42P01') {
+          console.warn('[SupabaseService] Table "public.subjects" does not exist in the connected database. Run migration supabase/migrations/20261006000001_create_subjects.sql to deploy.');
+          return [];
+        }
+        throw new Error(error.message);
+      }
+      return (data as Subject[]) || [];
+    } catch (err: any) {
+      if (err?.message?.includes('does not exist')) {
+        return [];
+      }
+      throw err;
+    }
+  }
+
+  async createSubject(data: Omit<Subject, 'id' | 'created_at'>): Promise<Subject> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { ...data, id: crypto.randomUUID(), is_active: true };
+    }
+    const { data: newSub, error } = await supabase
+      .from('subjects')
+      .insert({
+        institution_id: data.institution_id,
+        code: data.code.toUpperCase(),
+        name: data.name,
+        description: data.description || null,
+        education_level: data.education_level || null,
+        is_active: data.is_active ?? true,
+      })
+      .select()
+      .single();
+    if (error || !newSub) throw new Error(error?.message || 'Failed to create subject in PostgreSQL');
+    return newSub as Subject;
+  }
+
+  async updateSubject(id: string, updates: Partial<Subject>): Promise<Subject> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { id, institution_id: '', code: '', name: '', is_active: true, ...updates };
+    }
+    const { data, error } = await supabase
+      .from('subjects')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) throw new Error(error?.message || 'Failed to update subject');
+    return data as Subject;
+  }
+
+  async deleteSubject(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return true;
+    const { error } = await supabase.from('subjects').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
   }
 
   // ============================================================================
@@ -423,6 +734,128 @@ export class SupabaseService {
     return true;
   }
 
+  async getStudentById(id: string): Promise<Student | null> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.getStudent(id);
+    }
+    const { data, error } = await supabase
+      .from('students')
+      .select('*, campuses(id, name, code), academic_classes(id, name, code)')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) return null;
+    return {
+      ...data,
+      campus: data.campuses,
+      current_class: data.academic_classes,
+    } as Student;
+  }
+
+  // --- ENROLLMENTS ---
+  async getStudentEnrollments(studentId: string): Promise<StudentEnrollment[]> {
+    if (!isSupabaseConfigured || !supabase) {
+      return [];
+    }
+    const { data, error } = await supabase
+      .from('student_enrollments')
+      .select('*, academic_years(id, name, start_date, end_date), academic_classes(id, name, code, campuses(id, name))')
+      .eq('student_id', studentId)
+      .order('enrolled_at', { ascending: false });
+    if (error) throw new Error(error.message);
+    return ((data || []).map((row: any) => ({
+      ...row,
+      academic_year: row.academic_years,
+      academic_class: row.academic_classes,
+      campus: row.academic_classes?.campuses,
+    })) as StudentEnrollment[]);
+  }
+
+  async createStudentEnrollment(data: Omit<StudentEnrollment, 'id' | 'enrolled_at'>): Promise<StudentEnrollment> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { ...data, id: crypto.randomUUID(), enrolled_at: new Date().toISOString() };
+    }
+    const { data: newEnr, error } = await supabase
+      .from('student_enrollments')
+      .insert({
+        institution_id: data.institution_id,
+        student_id: data.student_id,
+        academic_year_id: data.academic_year_id,
+        class_id: data.class_id,
+        status: data.status || 'enrolled',
+        roll_number: data.roll_number || null,
+      })
+      .select()
+      .single();
+    if (error || !newEnr) throw new Error(error?.message || 'Failed to create student enrollment');
+
+    // Update current_class_id on students table
+    await supabase
+      .from('students')
+      .update({ current_class_id: data.class_id, updated_at: new Date().toISOString() })
+      .eq('id', data.student_id);
+
+    return newEnr as StudentEnrollment;
+  }
+
+  // --- GUARDIANS ---
+  async getGuardians(institutionId: string): Promise<Guardian[]> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.getGuardians(institutionId);
+    }
+    const { data, error } = await supabase
+      .from('guardians')
+      .select('*')
+      .eq('institution_id', institutionId)
+      .order('full_name');
+    if (error) throw new Error(error.message);
+    return (data as Guardian[]) || [];
+  }
+
+  async createGuardian(data: Omit<Guardian, 'id'>): Promise<Guardian> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { ...data, id: crypto.randomUUID() };
+    }
+    const { data: newG, error } = await supabase
+      .from('guardians')
+      .insert({
+        institution_id: data.institution_id,
+        user_id: data.user_id || null,
+        full_name: data.full_name,
+        relationship_type: data.relationship_type,
+        email: data.email || null,
+        phone: data.phone,
+        occupation: data.occupation || null,
+        is_emergency_contact: data.is_emergency_contact ?? true,
+        address: data.address || null,
+      })
+      .select()
+      .single();
+    if (error || !newG) throw new Error(error?.message || 'Failed to create guardian');
+    return newG as Guardian;
+  }
+
+  async updateGuardian(id: string, updates: Partial<Guardian>): Promise<Guardian> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { id, institution_id: '', full_name: '', relationship_type: '', phone: '', is_emergency_contact: true, ...updates };
+    }
+    const { data, error } = await supabase
+      .from('guardians')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) throw new Error(error?.message || 'Failed to update guardian');
+    return data as Guardian;
+  }
+
+  async deleteGuardian(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return true;
+    const { error } = await supabase.from('guardians').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
+  }
+
   async getGuardiansForStudent(studentId: string): Promise<Guardian[]> {
     if (!isSupabaseConfigured || !supabase) {
       return tenantStore.getGuardiansForStudent(studentId);
@@ -433,6 +866,149 @@ export class SupabaseService {
       .eq('student_id', studentId);
     if (error || !data) return [];
     return data.map((item: any) => item.guardians).filter(Boolean) as Guardian[];
+  }
+
+  async getStudentGuardians(studentId: string): Promise<StudentGuardian[]> {
+    if (!isSupabaseConfigured || !supabase) return [];
+    const { data, error } = await supabase
+      .from('student_guardians')
+      .select('*, guardians(*)')
+      .eq('student_id', studentId);
+    if (error || !data) return [];
+    return data.map((row: any) => ({
+      ...row,
+      guardian: row.guardians,
+    })) as StudentGuardian[];
+  }
+
+  async linkStudentGuardian(data: Omit<StudentGuardian, 'id'>): Promise<StudentGuardian> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { ...data, id: crypto.randomUUID() };
+    }
+    const { data: newLink, error } = await supabase
+      .from('student_guardians')
+      .insert({
+        student_id: data.student_id,
+        guardian_id: data.guardian_id,
+        is_primary: data.is_primary || false,
+        can_pickup: data.can_pickup ?? true,
+        receives_billing: data.receives_billing ?? true,
+      })
+      .select()
+      .single();
+    if (error || !newLink) throw new Error(error?.message || 'Failed to link guardian to student');
+    return newLink as StudentGuardian;
+  }
+
+  async unlinkStudentGuardian(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return true;
+    const { error } = await supabase.from('student_guardians').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
+  }
+
+  // --- INSTITUTION USERS & ROLES ---
+  async getInstitutionUsers(institutionId: string): Promise<InstitutionUser[]> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.getStaff(institutionId).map((s) => ({
+        id: s.id,
+        institution_id: institutionId,
+        user_id: s.user_id,
+        campus_id: s.campus_id,
+        role: 'teacher' as const,
+        custom_permissions: [],
+        is_active: true,
+        created_at: new Date().toISOString(),
+        user: {
+          id: s.user_id,
+          email: `${s.employee_number.toLowerCase()}@acadeemia.internal`,
+          full_name: s.job_title || 'Faculty Member',
+          is_platform_user: false,
+          created_at: new Date().toISOString(),
+        },
+      }));
+    }
+    const { data, error } = await supabase
+      .from('institution_users')
+      .select('*, users(id, email, full_name, avatar_url, phone)')
+      .eq('institution_id', institutionId);
+    if (error) throw new Error(error.message);
+    return ((data || []).map((row: any) => ({
+      ...row,
+      user: row.users,
+    })) as InstitutionUser[]);
+  }
+
+  async createInstitutionUser(data: Omit<InstitutionUser, 'id' | 'created_at'>): Promise<InstitutionUser> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { ...data, id: crypto.randomUUID(), created_at: new Date().toISOString() };
+    }
+    const { data: newIU, error } = await supabase
+      .from('institution_users')
+      .insert({
+        institution_id: data.institution_id,
+        user_id: data.user_id,
+        campus_id: data.campus_id || null,
+        role: data.role,
+        custom_permissions: data.custom_permissions || [],
+        is_active: data.is_active ?? true,
+      })
+      .select()
+      .single();
+    if (error || !newIU) throw new Error(error?.message || 'Failed to assign institution membership');
+    return newIU as InstitutionUser;
+  }
+
+  async updateInstitutionUser(id: string, updates: Partial<InstitutionUser>): Promise<InstitutionUser> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { id, institution_id: '', user_id: '', role: 'teacher', custom_permissions: [], is_active: true, created_at: '', ...updates };
+    }
+    const { data, error } = await supabase
+      .from('institution_users')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error || !data) throw new Error(error?.message || 'Failed to update institution user');
+    return data as InstitutionUser;
+  }
+
+  async deleteInstitutionUser(id: string): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) return true;
+    const { error } = await supabase.from('institution_users').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+    return true;
+  }
+
+  // --- USER PROFILES ---
+  async getUserProfile(userId: string): Promise<User | null> {
+    if (!isSupabaseConfigured || !supabase) return null;
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return (data as User) || null;
+  }
+
+  async updateUserProfile(userId: string, updates: Partial<User>): Promise<User> {
+    if (!isSupabaseConfigured || !supabase) {
+      return { id: userId, email: '', full_name: '', is_platform_user: false, created_at: '', ...updates };
+    }
+    const { data, error } = await supabase
+      .from('users')
+      .update({
+        full_name: updates.full_name,
+        avatar_url: updates.avatar_url,
+        phone: updates.phone,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId)
+      .select()
+      .single();
+    if (error || !data) throw new Error(error?.message || 'Failed to update user profile');
+    return data as User;
   }
 
   // ============================================================================

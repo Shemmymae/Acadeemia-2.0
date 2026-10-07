@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, GraduationCap, Building2, Layers, DollarSign, Users, Globe, Sparkles, X, ArrowRight } from 'lucide-react';
+import { Search, GraduationCap, Building2, Layers, DollarSign, Users, Globe, Sparkles, X, ArrowRight, BookOpen } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
 import { useModules } from '../../context/ModuleContext';
 
@@ -42,6 +42,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   // Navigation commands
   const quickActions = [
     { id: 'students', label: 'Student Information System (SIS)', icon: <GraduationCap className="w-4 h-4" />, category: 'Navigation', view: 'students' },
+    { id: 'academics', label: 'Academic Structure & Curriculum', icon: <BookOpen className="w-4 h-4" />, category: 'Navigation', view: 'academics' },
+    { id: 'campuses', label: 'Campuses & Branches Management', icon: <Building2 className="w-4 h-4" />, category: 'Navigation', view: 'campuses' },
+    { id: 'guardians', label: 'Guardians & Family Contacts', icon: <Users className="w-4 h-4" />, category: 'Navigation', view: 'guardians' },
+    { id: 'institution-users', label: 'Staff & User Roles Directory', icon: <Users className="w-4 h-4" />, category: 'Navigation', view: 'institution-users' },
     { id: 'finance', label: 'Fees Collection & Financial Invoices', icon: <DollarSign className="w-4 h-4" />, category: 'Navigation', view: 'finance' },
     { id: 'hr', label: 'Human Resources & Faculty Directory', icon: <Users className="w-4 h-4" />, category: 'Navigation', view: 'hr' },
     { id: 'modules', label: 'Module Registry & Add-ons', icon: <Layers className="w-4 h-4" />, category: 'Navigation', view: 'modules' },

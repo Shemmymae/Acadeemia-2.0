@@ -33,6 +33,9 @@ import { ModuleRegistryView } from './views/institution/ModuleRegistryView';
 import { InstitutionWebsiteCMSView } from './views/institution/InstitutionWebsiteCMSView';
 import { AIIntelligenceHubView } from './views/institution/AIIntelligenceHubView';
 import { InstitutionSettingsView } from './views/institution/InstitutionSettingsView';
+import { CampusesManagementView } from './views/institution/CampusesManagementView';
+import { InstitutionUsersView } from './views/institution/InstitutionUsersView';
+import { GuardiansManagementView } from './views/institution/GuardiansManagementView';
 
 const AppShell: React.FC = () => {
   const { mode, setMode, selectInstitution, activeInstitution } = useTenant();
@@ -61,6 +64,9 @@ const AppShell: React.FC = () => {
         case 'dashboard': return 'Executive Dashboard';
         case 'students': return 'Student Information System';
         case 'academics': return 'Academic Structure';
+        case 'campuses': return 'Campuses & Branches';
+        case 'guardians': return 'Guardians & Families';
+        case 'institution-users': return 'Staff & User Roles';
         case 'finance': return 'Fees & Student Billing';
         case 'hr': return 'Human Resources & Faculty';
         case 'modules': return 'Module Registry & Licensing';
@@ -144,6 +150,9 @@ const AppShell: React.FC = () => {
               )}
               {currentView === 'students' && <StudentManagementView />}
               {currentView === 'academics' && <AcademicStructureView />}
+              {currentView === 'campuses' && <CampusesManagementView />}
+              {currentView === 'guardians' && <GuardiansManagementView />}
+              {currentView === 'institution-users' && <InstitutionUsersView />}
               {currentView === 'finance' && <FinanceBillingView />}
               {currentView === 'hr' && <HumanResourcesView />}
               {currentView === 'modules' && <ModuleRegistryView />}

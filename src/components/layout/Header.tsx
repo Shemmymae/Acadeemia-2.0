@@ -17,6 +17,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Breadcrumbs } from '../ui/Breadcrumbs';
 import { INSTITUTION_ROLES_CONFIG } from '../../services/permissionEngine';
 import { InstitutionRole, PlatformRole } from '../../types';
+import { UserProfileModal } from '../modals/UserProfileModal';
 
 export interface HeaderProps {
   breadcrumbTitle: string;
@@ -59,6 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [tenantMenuOpen, setTenantMenuOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
 
   const breadcrumbs = [
     {
@@ -278,6 +280,20 @@ export const Header: React.FC<HeaderProps> = ({
 
                 {/* External Links */}
                 <div className="pt-2 border-t border-slate-800 space-y-1">
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      setProfileModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between px-2.5 py-1 text-xs text-slate-200 hover:bg-slate-800 rounded transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2">
+                      <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Edit Profile & Identity</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono">DB</span>
+                  </button>
+
                   {onOpenSupabaseConfig && (
                     <button
                       onClick={() => {
@@ -321,6 +337,12 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
+
+      {/* User Profile & Account Settings Modal */}
+      <UserProfileModal
+        isOpen={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+      />
     </header>
   );
 };

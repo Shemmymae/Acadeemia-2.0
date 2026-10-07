@@ -1134,6 +1134,14 @@ class TenantStore {
     return this.state.students[idx];
   }
 
+  getStudent(id: string): Student | null {
+    return this.state.students.find((s) => s.id === id) || null;
+  }
+
+  getGuardians(institutionId: string): Guardian[] {
+    return this.state.guardians.filter((g) => g.institution_id === institutionId);
+  }
+
   getGuardiansForStudent(studentId: string): Guardian[] {
     const links = this.state.studentGuardians.filter((sg) => sg.student_id === studentId);
     return links

@@ -333,6 +333,19 @@ CREATE TABLE IF NOT EXISTS academic_classes (
   UNIQUE(institution_id, academic_year_id, code)
 );
 
+CREATE TABLE IF NOT EXISTS subjects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  institution_id UUID NOT NULL REFERENCES institutions(id) ON DELETE CASCADE,
+  code VARCHAR(50) NOT NULL,
+  name VARCHAR(150) NOT NULL,
+  description TEXT,
+  education_level VARCHAR(50),
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(institution_id, code)
+);
+
 -- ==============================================================================
 -- 6. STUDENT IDENTITY & GUARDIANS
 -- ==============================================================================
@@ -673,7 +686,9 @@ AS $$
   );
 $$;
 
-GRANT EXECUTE ON FUNCTION institution_has_module_entitlement(UUID, VARCHAR) TO authenticated, anon;
+-- Restrict anonymous RPC probing of commercial entitlement metadata
+REVOKE EXECUTE ON FUNCTION public.institution_has_module_entitlement(UUID, VARCHAR) FROM anon, PUBLIC;
+GRANT EXECUTE ON FUNCTION public.institution_has_module_entitlement(UUID, VARCHAR) TO authenticated;
 
 -- Database-Enforced Subscription & Module Entitlement Trigger
 -- Strictly rejects any attempt to enable an unentitled module directly at the PostgreSQL engine level.
@@ -1018,6 +1033,14 @@ CREATE POLICY student_guardians_manage ON student_guardians
       WHERE s.id = student_guardians.student_id
         AND has_institution_role(s.institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::institution_role[])
     )
+  )
+  WITH CHECK (
+    is_platform_admin()
+    OR EXISTS (
+      SELECT 1 FROM students s
+      WHERE s.id = student_guardians.student_id
+        AND has_institution_role(s.institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::institution_role[])
+    )
   );
 
 -- ------------------------------------------------------------------------------
@@ -1029,7 +1052,8 @@ CREATE POLICY academic_years_select ON academic_years FOR SELECT
 
 DROP POLICY IF EXISTS academic_years_manage ON academic_years;
 CREATE POLICY academic_years_manage ON academic_years FOR ALL
-  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal']::institution_role[]));
+  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal']::institution_role[]))
+  WITH CHECK (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal']::institution_role[]));
 
 DROP POLICY IF EXISTS academic_terms_select ON academic_terms;
 CREATE POLICY academic_terms_select ON academic_terms FOR SELECT
@@ -1037,7 +1061,8 @@ CREATE POLICY academic_terms_select ON academic_terms FOR SELECT
 
 DROP POLICY IF EXISTS academic_terms_manage ON academic_terms;
 CREATE POLICY academic_terms_manage ON academic_terms FOR ALL
-  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal']::institution_role[]));
+  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal']::institution_role[]))
+  WITH CHECK (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal']::institution_role[]));
 
 DROP POLICY IF EXISTS academic_grades_select ON academic_grades;
 CREATE POLICY academic_grades_select ON academic_grades FOR SELECT
@@ -1045,7 +1070,8 @@ CREATE POLICY academic_grades_select ON academic_grades FOR SELECT
 
 DROP POLICY IF EXISTS academic_grades_manage ON academic_grades;
 CREATE POLICY academic_grades_manage ON academic_grades FOR ALL
-  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal']::institution_role[]));
+  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal']::institution_role[]))
+  WITH CHECK (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal']::institution_role[]));
 
 DROP POLICY IF EXISTS academic_classes_select ON academic_classes;
 CREATE POLICY academic_classes_select ON academic_classes FOR SELECT
@@ -1053,7 +1079,8 @@ CREATE POLICY academic_classes_select ON academic_classes FOR SELECT
 
 DROP POLICY IF EXISTS academic_classes_manage ON academic_classes;
 CREATE POLICY academic_classes_manage ON academic_classes FOR ALL
-  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::institution_role[]));
+  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::institution_role[]))
+  WITH CHECK (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::institution_role[]));
 
 DROP POLICY IF EXISTS student_enrollments_select ON student_enrollments;
 CREATE POLICY student_enrollments_select ON student_enrollments FOR SELECT
@@ -1061,7 +1088,17 @@ CREATE POLICY student_enrollments_select ON student_enrollments FOR SELECT
 
 DROP POLICY IF EXISTS student_enrollments_manage ON student_enrollments;
 CREATE POLICY student_enrollments_manage ON student_enrollments FOR ALL
-  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::institution_role[]));
+  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::institution_role[]))
+  WITH CHECK (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::institution_role[]));
+
+DROP POLICY IF EXISTS subjects_select ON subjects;
+CREATE POLICY subjects_select ON subjects FOR SELECT
+  USING (is_platform_user() OR has_institution_membership(institution_id));
+
+DROP POLICY IF EXISTS subjects_manage ON subjects;
+CREATE POLICY subjects_manage ON subjects FOR ALL
+  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::institution_role[]))
+  WITH CHECK (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'school_admin']::institution_role[]));
 
 -- ------------------------------------------------------------------------------
 -- H. HUMAN RESOURCES
@@ -1072,7 +1109,8 @@ CREATE POLICY hr_departments_select ON hr_departments FOR SELECT
 
 DROP POLICY IF EXISTS hr_departments_manage ON hr_departments;
 CREATE POLICY hr_departments_manage ON hr_departments FOR ALL
-  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'hr_manager']::institution_role[]));
+  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'hr_manager']::institution_role[]))
+  WITH CHECK (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'principal', 'hr_manager']::institution_role[]));
 
 DROP POLICY IF EXISTS hr_staff_select ON hr_staff;
 CREATE POLICY hr_staff_select ON hr_staff FOR SELECT
@@ -1080,7 +1118,8 @@ CREATE POLICY hr_staff_select ON hr_staff FOR SELECT
 
 DROP POLICY IF EXISTS hr_staff_manage ON hr_staff;
 CREATE POLICY hr_staff_manage ON hr_staff FOR ALL
-  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'hr_manager']::institution_role[]));
+  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'hr_manager']::institution_role[]))
+  WITH CHECK (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'hr_manager']::institution_role[]));
 
 -- ------------------------------------------------------------------------------
 -- I. FINANCE
@@ -1091,7 +1130,8 @@ CREATE POLICY finance_fee_structures_select ON finance_fee_structures FOR SELECT
 
 DROP POLICY IF EXISTS finance_fee_structures_manage ON finance_fee_structures;
 CREATE POLICY finance_fee_structures_manage ON finance_fee_structures FOR ALL
-  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'accountant']::institution_role[]));
+  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'accountant']::institution_role[]))
+  WITH CHECK (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin', 'accountant']::institution_role[]));
 
 DROP POLICY IF EXISTS finance_invoices_select ON finance_invoices;
 CREATE POLICY finance_invoices_select ON finance_invoices FOR SELECT
@@ -1233,7 +1273,8 @@ CREATE POLICY institution_websites_select ON institution_websites FOR SELECT
 
 DROP POLICY IF EXISTS institution_websites_manage ON institution_websites;
 CREATE POLICY institution_websites_manage ON institution_websites FOR ALL
-  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin']::institution_role[]));
+  USING (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin']::institution_role[]))
+  WITH CHECK (is_platform_admin() OR has_institution_role(institution_id, ARRAY['institution_owner', 'institution_admin']::institution_role[]));
 
 -- ------------------------------------------------------------------------------
 -- K. AUDIT LOGGING & AI TELEMETRY (Append Only, No Deletions)
