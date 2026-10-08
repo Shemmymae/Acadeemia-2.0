@@ -8,6 +8,7 @@
 
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { tenantStore } from './tenantStore';
+import { SYSTEM_MODULES, CORE_MODULE_CODES } from './moduleRegistry';
 import {
   AcademicClass,
   AcademicGrade,
@@ -35,6 +36,13 @@ import {
   Subject,
   Subscription,
   User,
+  AdmissionInquiry,
+  AdmissionApplicant,
+  AdmissionApplicantGuardian,
+  AdmissionApplication,
+  AdmissionConversion,
+  AdmissionStats,
+  DuplicateApplicantMatch,
 } from '../types';
 
 export class SupabaseService {
@@ -1140,12 +1148,18 @@ export class SupabaseService {
     if (!isSupabaseConfigured || !supabase) {
       return tenantStore.getModules();
     }
-    const { data, error } = await supabase
-      .from('modules')
-      .select('*')
-      .order('name');
-    if (error) throw new Error(error.message);
-    return (data as unknown as ModuleDefinition[]) || [];
+    try {
+      const { data, error } = await supabase
+        .from('modules')
+        .select('*')
+        .order('name');
+      if (error || !data || data.length === 0) {
+        return SYSTEM_MODULES;
+      }
+      return data as ModuleDefinition[];
+    } catch {
+      return SYSTEM_MODULES;
+    }
   }
 
   async getPackages(): Promise<Package[]> {
@@ -1170,10 +1184,237 @@ export class SupabaseService {
       .eq('institution_id', institutionId)
       .maybeSingle();
     if (error || !data) return null;
+
+    // Join package details
+    let pkg: Package | undefined = undefined;
+    if (data.package_id) {
+      const { data: pkgData } = await supabase
+        .from('packages')
+        .select('*')
+        .eq('id', data.package_id)
+        .maybeSingle();
+      if (pkgData) pkg = pkgData as Package;
+    }
+
     return {
       ...data,
+      package: pkg,
       addons: data.subscription_addons || [],
     } as Subscription;
+  }
+
+  /**
+   * Change or activate subscription package tier for an institution
+   */
+  async changeSubscriptionPackage(
+    institutionId: string,
+    packageId: string
+  ): Promise<Subscription> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.updateSubscriptionPackage(institutionId, packageId);
+    }
+
+    // Try RPC first for authoritative transactional execution
+    try {
+      const { error: rpcErr } = await supabase.rpc('subscribe_institution_package', {
+        p_institution_id: institutionId,
+        p_package_id: packageId,
+      });
+      if (!rpcErr) {
+        const sub = await this.getSubscription(institutionId);
+        if (sub) return sub;
+      }
+    } catch {
+      // Fall through to direct table upsert
+    }
+
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .upsert(
+        {
+          institution_id: institutionId,
+          package_id: packageId,
+          status: 'active',
+          current_period_start: new Date().toISOString(),
+          current_period_end: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+          cancel_at_period_end: false,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'institution_id' }
+      )
+      .select('*, subscription_addons(*)')
+      .single();
+
+    if (error || !data) {
+      throw new Error(`Failed to change subscription package: ${error?.message}`);
+    }
+
+    await this.logAuditEvent({
+      tenant_id: institutionId,
+      actor_name: 'Institution Authority',
+      action: 'SUBSCRIPTION_PACKAGE_CHANGED',
+      entity_type: 'subscriptions',
+      entity_id: data.id,
+      details: { package_id: packageId },
+    });
+
+    const sub = await this.getSubscription(institutionId);
+    return sub || (data as Subscription);
+  }
+
+  /**
+   * Add a module as a subscription add-on
+   */
+  async addSubscriptionAddon(
+    institutionId: string,
+    moduleCode: string,
+    priceCents = 0
+  ): Promise<Subscription> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.addSubscriptionAddon(institutionId, moduleCode, priceCents);
+    }
+
+    // Try RPC first
+    try {
+      const { error: rpcErr } = await supabase.rpc('add_institution_subscription_addon', {
+        p_institution_id: institutionId,
+        p_module_code: moduleCode,
+        p_price_cents: priceCents,
+      });
+      if (!rpcErr) {
+        const sub = await this.getSubscription(institutionId);
+        if (sub) return sub;
+      }
+    } catch {
+      // Fallback
+    }
+
+    let sub = await this.getSubscription(institutionId);
+    if (!sub) {
+      const pkgs = await this.getPackages();
+      const defaultPkg = pkgs[0];
+      if (defaultPkg) {
+        sub = await this.changeSubscriptionPackage(institutionId, defaultPkg.id);
+      }
+    }
+
+    if (!sub) throw new Error('No active subscription found to attach add-on');
+
+    const { error: addonErr } = await supabase.from('subscription_addons').upsert(
+      {
+        subscription_id: sub.id,
+        module_code: moduleCode,
+        price_cents: priceCents,
+        added_at: new Date().toISOString(),
+      },
+      { onConflict: 'subscription_id,module_code' }
+    );
+
+    if (addonErr) {
+      throw new Error(`Failed to purchase add-on: ${addonErr.message}`);
+    }
+
+    await this.logAuditEvent({
+      tenant_id: institutionId,
+      actor_name: 'Institution Authority',
+      action: 'SUBSCRIPTION_ADDON_PURCHASED',
+      entity_type: 'subscription_addons',
+      entity_id: moduleCode,
+      details: { module_code: moduleCode, price_cents: priceCents },
+    });
+
+    const updated = await this.getSubscription(institutionId);
+    return updated || sub;
+  }
+
+  /**
+   * Remove an active subscription add-on
+   */
+  async removeSubscriptionAddon(
+    institutionId: string,
+    moduleCode: string
+  ): Promise<Subscription> {
+    if (!isSupabaseConfigured || !supabase) {
+      const res = tenantStore.removeSubscriptionAddon(institutionId, moduleCode);
+      if (!res) throw new Error('Failed to remove add-on');
+      return res;
+    }
+
+    try {
+      const { error: rpcErr } = await supabase.rpc('remove_institution_subscription_addon', {
+        p_institution_id: institutionId,
+        p_module_code: moduleCode,
+      });
+      if (!rpcErr) {
+        const sub = await this.getSubscription(institutionId);
+        if (sub) return sub;
+      }
+    } catch {
+      // Fallback
+    }
+
+    const sub = await this.getSubscription(institutionId);
+    if (sub) {
+      await supabase
+        .from('subscription_addons')
+        .delete()
+        .eq('subscription_id', sub.id)
+        .eq('module_code', moduleCode);
+
+      // Disable module in institution_modules
+      await supabase
+        .from('institution_modules')
+        .update({ is_enabled: false, updated_at: new Date().toISOString() })
+        .eq('institution_id', institutionId)
+        .eq('module_code', moduleCode);
+
+      await this.logAuditEvent({
+        tenant_id: institutionId,
+        actor_name: 'Institution Authority',
+        action: 'SUBSCRIPTION_ADDON_REMOVED',
+        entity_type: 'subscription_addons',
+        entity_id: moduleCode,
+        details: { module_code: moduleCode },
+      });
+    }
+
+    const updated = await this.getSubscription(institutionId);
+    return updated || (sub as Subscription);
+  }
+
+  /**
+   * Query database entitlement directly via RPC
+   */
+  async checkModuleEntitlement(
+    institutionId: string,
+    moduleCode: string
+  ): Promise<boolean> {
+    if (!isSupabaseConfigured || !supabase) {
+      const sub = tenantStore.getSubscription(institutionId);
+      if (CORE_MODULE_CODES.has(moduleCode)) return true;
+      if (!sub) return false;
+      const pkg = sub.package;
+      if (pkg && pkg.included_modules.includes(moduleCode)) return true;
+      return sub.addons.some((a) => a.module_code === moduleCode);
+    }
+
+    try {
+      const { data, error } = await supabase.rpc('institution_has_module_entitlement', {
+        target_institution_id: institutionId,
+        target_module_code: moduleCode,
+      });
+      if (!error && typeof data === 'boolean') {
+        return data;
+      }
+    } catch {
+      // Fall through to local check
+    }
+
+    const sub = await this.getSubscription(institutionId);
+    if (CORE_MODULE_CODES.has(moduleCode)) return true;
+    if (!sub || sub.status !== 'active') return false;
+    if (sub.package?.included_modules.includes(moduleCode)) return true;
+    return sub.addons.some((a) => a.module_code === moduleCode);
   }
 
   async getInstitutionModules(institutionId: string): Promise<InstitutionModule[]> {
@@ -1371,6 +1612,667 @@ export class SupabaseService {
     }
     return tenantStore.getAIInsights(institutionId);
   }
+
+  // ============================================================================
+  // ADMISSIONS & APPLICANT MANAGEMENT DOMAIN (PHASE 4C)
+  // ============================================================================
+
+  async getAdmissionStats(institutionId: string, campusId?: string): Promise<AdmissionStats> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.getAdmissionStats(institutionId, campusId);
+    }
+    try {
+      let inqQ = supabase.from('admission_inquiries').select('id, status', { count: 'exact' }).eq('institution_id', institutionId);
+      let appQ = supabase.from('admission_applicants').select('id, status', { count: 'exact' }).eq('institution_id', institutionId);
+      let applQ = supabase.from('admission_applications').select('id, status', { count: 'exact' }).eq('institution_id', institutionId);
+
+      if (campusId) {
+        inqQ = inqQ.eq('campus_id', campusId);
+        appQ = appQ.eq('campus_id', campusId);
+        applQ = applQ.eq('campus_id', campusId);
+      }
+
+      const [inqRes, appRes, applRes] = await Promise.all([inqQ, appQ, applQ]);
+      if (inqRes.error || appRes.error || applRes.error) {
+        return tenantStore.getAdmissionStats(institutionId, campusId);
+      }
+
+      const inqs = inqRes.data || [];
+      const apps = appRes.data || [];
+      const appls = applRes.data || [];
+
+      return {
+        totalInquiries: inqRes.count || inqs.length,
+        newInquiries: inqs.filter((i) => i.status === 'new').length,
+        totalApplicants: appRes.count || apps.length,
+        submittedApplications: appls.filter((a) => a.status === 'submitted').length,
+        underReviewApplications: appls.filter((a) => a.status === 'under_review').length,
+        acceptedApplications: appls.filter((a) => a.status === 'accepted').length,
+        waitlistedApplications: appls.filter((a) => a.status === 'waitlisted').length,
+        rejectedApplications: appls.filter((a) => a.status === 'rejected').length,
+        convertedStudents: appls.filter((a) => a.status === 'converted').length,
+      };
+    } catch {
+      return tenantStore.getAdmissionStats(institutionId, campusId);
+    }
+  }
+
+  async getInquiries(
+    institutionId: string,
+    filters?: { campusId?: string; status?: string }
+  ): Promise<AdmissionInquiry[]> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.getInquiries(institutionId, filters);
+    }
+    try {
+      let query = supabase
+        .from('admission_inquiries')
+        .select(`
+          *,
+          campus:campuses(*),
+          academic_year:academic_years(*),
+          interested_grade:academic_grades(*)
+        `)
+        .eq('institution_id', institutionId)
+        .order('created_at', { ascending: false });
+
+      if (filters?.campusId) query = query.eq('campus_id', filters.campusId);
+      if (filters?.status && filters.status !== 'all') query = query.eq('status', filters.status);
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('Falling back to tenantStore for inquiries:', error.message);
+        return tenantStore.getInquiries(institutionId, filters);
+      }
+      return (data as AdmissionInquiry[]) || [];
+    } catch {
+      return tenantStore.getInquiries(institutionId, filters);
+    }
+  }
+
+  async createInquiry(
+    data: Omit<AdmissionInquiry, 'id' | 'inquiry_number' | 'created_at' | 'updated_at'>
+  ): Promise<AdmissionInquiry> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.createInquiry(data);
+    }
+    try {
+      // 1. Generate sequence number
+      let inquiryNumber: string;
+      const { data: seqData, error: seqErr } = await supabase.rpc('generate_institution_sequence', {
+        p_institution_id: data.institution_id,
+        p_sequence_type: 'inquiry',
+        p_prefix: 'INQ',
+      });
+
+      if (!seqErr && seqData) {
+        inquiryNumber = seqData;
+      } else {
+        const year = new Date().getFullYear();
+        inquiryNumber = `INQ-${year}-${Math.floor(100000 + Math.random() * 900000)}`;
+      }
+
+      const { data: newInq, error } = await supabase
+        .from('admission_inquiries')
+        .insert({
+          institution_id: data.institution_id,
+          campus_id: data.campus_id || null,
+          academic_year_id: data.academic_year_id || null,
+          interested_grade_id: data.interested_grade_id || null,
+          inquiry_number: inquiryNumber,
+          prospective_student_name: data.prospective_student_name,
+          prospective_student_date_of_birth: data.prospective_student_date_of_birth || null,
+          guardian_name: data.guardian_name,
+          guardian_email: data.guardian_email || null,
+          guardian_phone: data.guardian_phone,
+          source: data.source || 'website',
+          notes: data.notes || null,
+          status: data.status || 'new',
+        })
+        .select()
+        .single();
+
+      if (error || !newInq) throw error;
+      await this.logAuditEvent({
+        tenant_id: data.institution_id,
+        action: 'inquiry_created',
+        entity_type: 'admission_inquiry',
+        entity_id: newInq.id,
+        details: { inquiry_number: inquiryNumber, student: data.prospective_student_name },
+      });
+      return newInq as AdmissionInquiry;
+    } catch (err: any) {
+      console.warn('Supabase createInquiry error, falling back:', err.message);
+      return tenantStore.createInquiry(data);
+    }
+  }
+
+  async updateInquiry(id: string, updates: Partial<AdmissionInquiry>): Promise<AdmissionInquiry> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.updateInquiry(id, updates);
+    }
+    try {
+      const { data, error } = await supabase
+        .from('admission_inquiries')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error || !data) throw error;
+      await this.logAuditEvent({
+        tenant_id: data.institution_id,
+        action: 'inquiry_updated',
+        entity_type: 'admission_inquiry',
+        entity_id: id,
+        details: updates as Record<string, unknown>,
+      });
+      return data as AdmissionInquiry;
+    } catch {
+      return tenantStore.updateInquiry(id, updates);
+    }
+  }
+
+  async convertInquiryToApplicant(
+    inquiryId: string,
+    applicantData?: Partial<AdmissionApplicant>
+  ): Promise<AdmissionApplicant> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.convertInquiryToApplicant(inquiryId, applicantData);
+    }
+    try {
+      const { data: inq } = await supabase.from('admission_inquiries').select('*').eq('id', inquiryId).single();
+      if (!inq) throw new Error('Inquiry not found');
+
+      const names = inq.prospective_student_name.trim().split(' ');
+      const firstName = names[0] || 'Applicant';
+      const lastName = names.slice(1).join(' ') || 'Student';
+
+      const applicant = await this.createApplicant({
+        institution_id: inq.institution_id,
+        campus_id: inq.campus_id,
+        inquiry_id: inq.id,
+        first_name: applicantData?.first_name || firstName,
+        middle_name: applicantData?.middle_name || null,
+        last_name: applicantData?.last_name || lastName,
+        preferred_name: applicantData?.preferred_name || null,
+        date_of_birth: inq.prospective_student_date_of_birth || '2012-01-01',
+        gender: applicantData?.gender || null,
+        email: inq.guardian_email || null,
+        phone: inq.guardian_phone,
+        status: 'draft',
+        notes: `Converted from Inquiry ${inq.inquiry_number}. ${inq.notes || ''}`,
+      });
+
+      await this.updateInquiry(inquiryId, { status: 'converted' });
+      return applicant;
+    } catch {
+      return tenantStore.convertInquiryToApplicant(inquiryId, applicantData);
+    }
+  }
+
+  async getApplicants(
+    institutionId: string,
+    filters?: { campusId?: string; status?: string; search?: string }
+  ): Promise<AdmissionApplicant[]> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.getApplicants(institutionId, filters);
+    }
+    try {
+      let query = supabase
+        .from('admission_applicants')
+        .select(`
+          *,
+          campus:campuses(*),
+          inquiry:admission_inquiries(*),
+          guardians:admission_applicant_guardians(*, guardian:guardians(*)),
+          applications:admission_applications(*)
+        `)
+        .eq('institution_id', institutionId)
+        .order('created_at', { ascending: false });
+
+      if (filters?.campusId) query = query.eq('campus_id', filters.campusId);
+      if (filters?.status && filters.status !== 'all') query = query.eq('status', filters.status);
+      if (filters?.search) {
+        query = query.or(
+          `first_name.ilike.%${filters.search}%,last_name.ilike.%${filters.search}%,applicant_number.ilike.%${filters.search}%`
+        );
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('Falling back to tenantStore for applicants:', error.message);
+        return tenantStore.getApplicants(institutionId, filters);
+      }
+      return (data as AdmissionApplicant[]) || [];
+    } catch {
+      return tenantStore.getApplicants(institutionId, filters);
+    }
+  }
+
+  async getApplicantById(id: string): Promise<AdmissionApplicant | null> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.getApplicantById(id);
+    }
+    try {
+      const { data, error } = await supabase
+        .from('admission_applicants')
+        .select(`
+          *,
+          campus:campuses(*),
+          inquiry:admission_inquiries(*),
+          guardians:admission_applicant_guardians(*, guardian:guardians(*)),
+          applications:admission_applications(
+            *,
+            grade:academic_grades(*),
+            campus:campuses(*),
+            academic_year:academic_years(*),
+            class:academic_classes(*)
+          )
+        `)
+        .eq('id', id)
+        .single();
+
+      if (error || !data) return tenantStore.getApplicantById(id);
+      return data as AdmissionApplicant;
+    } catch {
+      return tenantStore.getApplicantById(id);
+    }
+  }
+
+  async createApplicant(
+    data: Omit<AdmissionApplicant, 'id' | 'applicant_number' | 'created_at' | 'updated_at'>,
+    guardianData?: { guardian_id: string; relationship: string; is_primary?: boolean }
+  ): Promise<AdmissionApplicant> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.createApplicant(data);
+    }
+    try {
+      let applicantNumber: string;
+      const { data: seqData, error: seqErr } = await supabase.rpc('generate_institution_sequence', {
+        p_institution_id: data.institution_id,
+        p_sequence_type: 'applicant',
+        p_prefix: 'APP',
+      });
+
+      if (!seqErr && seqData) {
+        applicantNumber = seqData;
+      } else {
+        const year = new Date().getFullYear();
+        applicantNumber = `APP-${year}-${Math.floor(100000 + Math.random() * 900000)}`;
+      }
+
+      const { data: newApplicant, error } = await supabase
+        .from('admission_applicants')
+        .insert({
+          institution_id: data.institution_id,
+          campus_id: data.campus_id || null,
+          applicant_number: applicantNumber,
+          inquiry_id: data.inquiry_id || null,
+          first_name: data.first_name,
+          middle_name: data.middle_name || null,
+          last_name: data.last_name,
+          preferred_name: data.preferred_name || null,
+          date_of_birth: data.date_of_birth,
+          gender: data.gender || null,
+          nationality: data.nationality || null,
+          email: data.email || null,
+          phone: data.phone || null,
+          address: data.address || null,
+          previous_school: data.previous_school || null,
+          notes: data.notes || null,
+          status: data.status || 'draft',
+        })
+        .select()
+        .single();
+
+      if (error || !newApplicant) throw error;
+
+      if (guardianData?.guardian_id) {
+        await supabase.from('admission_applicant_guardians').insert({
+          institution_id: data.institution_id,
+          applicant_id: newApplicant.id,
+          guardian_id: guardianData.guardian_id,
+          relationship: guardianData.relationship,
+          is_primary: guardianData.is_primary ?? true,
+        });
+      }
+
+      await this.logAuditEvent({
+        tenant_id: data.institution_id,
+        action: 'applicant_created',
+        entity_type: 'admission_applicant',
+        entity_id: newApplicant.id,
+        details: { applicant_number: applicantNumber, name: `${data.first_name} ${data.last_name}` },
+      });
+
+      return newApplicant as AdmissionApplicant;
+    } catch (err: any) {
+      console.warn('Supabase createApplicant error, falling back:', err.message);
+      return tenantStore.createApplicant(data);
+    }
+  }
+
+  async updateApplicant(id: string, updates: Partial<AdmissionApplicant>): Promise<AdmissionApplicant> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.updateApplicant(id, updates);
+    }
+    try {
+      const { data, error } = await supabase
+        .from('admission_applicants')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error || !data) throw error;
+      await this.logAuditEvent({
+        tenant_id: data.institution_id,
+        action: 'applicant_updated',
+        entity_type: 'admission_applicant',
+        entity_id: id,
+        details: updates as Record<string, unknown>,
+      });
+      return data as AdmissionApplicant;
+    } catch {
+      return tenantStore.updateApplicant(id, updates);
+    }
+  }
+
+  async getApplications(
+    institutionId: string,
+    filters?: { campusId?: string; status?: string; gradeId?: string; academicYearId?: string; search?: string }
+  ): Promise<AdmissionApplication[]> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.getApplications(institutionId, filters);
+    }
+    try {
+      let query = supabase
+        .from('admission_applications')
+        .select(`
+          *,
+          applicant:admission_applicants(*),
+          campus:campuses(*),
+          grade:academic_grades(*),
+          class:academic_classes(*),
+          academic_year:academic_years(*)
+        `)
+        .eq('institution_id', institutionId)
+        .order('created_at', { ascending: false });
+
+      if (filters?.campusId) query = query.eq('campus_id', filters.campusId);
+      if (filters?.status && filters.status !== 'all') query = query.eq('status', filters.status);
+      if (filters?.gradeId) query = query.eq('grade_id', filters.gradeId);
+      if (filters?.academicYearId) query = query.eq('academic_year_id', filters.academicYearId);
+      if (filters?.search) {
+        query = query.ilike('application_number', `%${filters.search}%`);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        console.warn('Falling back to tenantStore for applications:', error.message);
+        return tenantStore.getApplications(institutionId, filters);
+      }
+      return (data as AdmissionApplication[]) || [];
+    } catch {
+      return tenantStore.getApplications(institutionId, filters);
+    }
+  }
+
+  async getApplicationById(id: string): Promise<AdmissionApplication | null> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.getApplicationById(id);
+    }
+    try {
+      const { data, error } = await supabase
+        .from('admission_applications')
+        .select(`
+          *,
+          applicant:admission_applicants(*),
+          campus:campuses(*),
+          grade:academic_grades(*),
+          class:academic_classes(*),
+          academic_year:academic_years(*)
+        `)
+        .eq('id', id)
+        .single();
+
+      if (error || !data) return tenantStore.getApplicationById(id);
+      return data as AdmissionApplication;
+    } catch {
+      return tenantStore.getApplicationById(id);
+    }
+  }
+
+  async createApplication(
+    data: Omit<AdmissionApplication, 'id' | 'application_number' | 'created_at' | 'updated_at'>
+  ): Promise<AdmissionApplication> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.createApplication(data);
+    }
+    try {
+      let applicationNumber: string;
+      const { data: seqData, error: seqErr } = await supabase.rpc('generate_institution_sequence', {
+        p_institution_id: data.institution_id,
+        p_sequence_type: 'application',
+        p_prefix: 'ADM',
+      });
+
+      if (!seqErr && seqData) {
+        applicationNumber = seqData;
+      } else {
+        const year = new Date().getFullYear();
+        applicationNumber = `ADM-${year}-${Math.floor(100000 + Math.random() * 900000)}`;
+      }
+
+      const { data: newApp, error } = await supabase
+        .from('admission_applications')
+        .insert({
+          institution_id: data.institution_id,
+          applicant_id: data.applicant_id,
+          academic_year_id: data.academic_year_id,
+          campus_id: data.campus_id,
+          grade_id: data.grade_id,
+          class_id: data.class_id || null,
+          application_number: applicationNumber,
+          application_date: data.application_date || new Date().toISOString().split('T')[0],
+          status: data.status || 'draft',
+          notes: data.notes || null,
+        })
+        .select()
+        .single();
+
+      if (error || !newApp) throw error;
+      await this.logAuditEvent({
+        tenant_id: data.institution_id,
+        action: 'application_created',
+        entity_type: 'admission_application',
+        entity_id: newApp.id,
+        details: { application_number: applicationNumber, applicant_id: data.applicant_id },
+      });
+      return newApp as AdmissionApplication;
+    } catch (err: any) {
+      console.warn('Supabase createApplication error, falling back:', err.message);
+      return tenantStore.createApplication(data);
+    }
+  }
+
+  async updateApplication(id: string, updates: Partial<AdmissionApplication>): Promise<AdmissionApplication> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.updateApplication(id, updates);
+    }
+    try {
+      const { data, error } = await supabase
+        .from('admission_applications')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error || !data) throw error;
+      await this.logAuditEvent({
+        tenant_id: data.institution_id,
+        action: 'application_updated',
+        entity_type: 'admission_application',
+        entity_id: id,
+        details: updates as Record<string, unknown>,
+      });
+      return data as AdmissionApplication;
+    } catch {
+      return tenantStore.updateApplication(id, updates);
+    }
+  }
+
+  async submitApplication(id: string): Promise<AdmissionApplication> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.submitApplication(id);
+    }
+    return this.updateApplication(id, {
+      status: 'submitted',
+      submitted_at: new Date().toISOString(),
+    });
+  }
+
+  async startApplicationReview(id: string, reviewerId?: string): Promise<AdmissionApplication> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.startApplicationReview(id, reviewerId);
+    }
+    return this.updateApplication(id, {
+      status: 'under_review',
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: reviewerId,
+    });
+  }
+
+  async acceptApplication(id: string, deciderId?: string, notes?: string): Promise<AdmissionApplication> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.acceptApplication(id, deciderId, notes);
+    }
+    return this.updateApplication(id, {
+      status: 'accepted',
+      decision_at: new Date().toISOString(),
+      decided_by: deciderId,
+      decision_reason: notes || 'Application accepted.',
+    });
+  }
+
+  async waitlistApplication(id: string, deciderId?: string, notes?: string): Promise<AdmissionApplication> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.waitlistApplication(id, deciderId, notes);
+    }
+    return this.updateApplication(id, {
+      status: 'waitlisted',
+      decision_at: new Date().toISOString(),
+      decided_by: deciderId,
+      decision_reason: notes || 'Waitlisted.',
+    });
+  }
+
+  async rejectApplication(id: string, deciderId?: string, reason?: string): Promise<AdmissionApplication> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.rejectApplication(id, deciderId, reason);
+    }
+    return this.updateApplication(id, {
+      status: 'rejected',
+      decision_at: new Date().toISOString(),
+      decided_by: deciderId,
+      decision_reason: reason || 'Application rejected.',
+    });
+  }
+
+  async withdrawApplication(id: string, reason?: string): Promise<AdmissionApplication> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.withdrawApplication(id, reason);
+    }
+    return this.updateApplication(id, {
+      status: 'withdrawn',
+      decision_reason: reason || 'Withdrawn.',
+    });
+  }
+
+  async convertApplicantToStudent(
+    applicationId: string,
+    classId?: string
+  ): Promise<{ success: boolean; student_id: string; student_number: string; enrollment_id?: string; conversion_id: string }> {
+    if (!isSupabaseConfigured || !supabase) {
+      const res = tenantStore.convertApplicantToStudent(applicationId, classId);
+      return {
+        success: res.success,
+        student_id: res.student.id,
+        student_number: res.student.student_number,
+        enrollment_id: res.enrollment?.id,
+        conversion_id: res.conversionId,
+      };
+    }
+    try {
+      // 1. Call PostgreSQL RPC convert_applicant_to_student
+      const { data, error } = await supabase.rpc('convert_applicant_to_student', {
+        p_application_id: applicationId,
+        p_class_id: classId || null,
+      });
+
+      if (error) {
+        console.warn('RPC convert_applicant_to_student error, falling back:', error.message);
+        const res = tenantStore.convertApplicantToStudent(applicationId, classId);
+        return {
+          success: res.success,
+          student_id: res.student.id,
+          student_number: res.student.student_number,
+          enrollment_id: res.enrollment?.id,
+          conversion_id: res.conversionId,
+        };
+      }
+
+      return data as { success: boolean; student_id: string; student_number: string; enrollment_id?: string; conversion_id: string };
+    } catch {
+      const res = tenantStore.convertApplicantToStudent(applicationId, classId);
+      return {
+        success: res.success,
+        student_id: res.student.id,
+        student_number: res.student.student_number,
+        enrollment_id: res.enrollment?.id,
+        conversion_id: res.conversionId,
+      };
+    }
+  }
+
+  async detectDuplicateApplicants(
+    institutionId: string,
+    firstName: string,
+    lastName: string,
+    dob: string,
+    email?: string,
+    phone?: string
+  ): Promise<DuplicateApplicantMatch[]> {
+    if (!isSupabaseConfigured || !supabase) {
+      return tenantStore.detectDuplicateApplicants(institutionId, firstName, lastName, dob, email, phone);
+    }
+    try {
+      const { data, error } = await supabase.rpc('detect_duplicate_applicants', {
+        p_institution_id: institutionId,
+        p_first_name: firstName,
+        p_last_name: lastName,
+        p_dob: dob,
+        p_email: email || null,
+        p_phone: phone || null,
+      });
+
+      if (!error && data) return data as DuplicateApplicantMatch[];
+    } catch {
+      // fallback
+    }
+    return tenantStore.detectDuplicateApplicants(institutionId, firstName, lastName, dob, email, phone);
+  }
 }
 
 export const supabaseService = new SupabaseService();
+

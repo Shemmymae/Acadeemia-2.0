@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, GraduationCap, Building2, Layers, DollarSign, Users, Globe, Sparkles, X, ArrowRight, BookOpen } from 'lucide-react';
+import { Search, GraduationCap, Building2, Layers, DollarSign, Users, Globe, Sparkles, X, ArrowRight, BookOpen, UserPlus } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
 import { useModules } from '../../context/ModuleContext';
 
@@ -16,7 +16,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 }) => {
   const [query, setQuery] = useState('');
   const { accessibleInstitutions, selectInstitution, activeInstitution, mode, setMode } = useTenant();
-  const { modules } = useModules();
+  const { modules, isModuleEntitled, isModuleEnabled } = useModules();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -43,6 +43,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const quickActions = [
     { id: 'students', label: 'Student Information System (SIS)', icon: <GraduationCap className="w-4 h-4" />, category: 'Navigation', view: 'students' },
     { id: 'academics', label: 'Academic Structure & Curriculum', icon: <BookOpen className="w-4 h-4" />, category: 'Navigation', view: 'academics' },
+    { id: 'admissions', label: 'Admissions & Applicant Management', icon: <UserPlus className="w-4 h-4" />, category: 'Navigation', view: 'admissions' },
     { id: 'campuses', label: 'Campuses & Branches Management', icon: <Building2 className="w-4 h-4" />, category: 'Navigation', view: 'campuses' },
     { id: 'guardians', label: 'Guardians & Family Contacts', icon: <Users className="w-4 h-4" />, category: 'Navigation', view: 'guardians' },
     { id: 'institution-users', label: 'Staff & User Roles Directory', icon: <Users className="w-4 h-4" />, category: 'Navigation', view: 'institution-users' },
@@ -184,18 +185,45 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 Available Modules Catalog ({filteredModules.length})
               </div>
               <div className="space-y-1 mt-1">
-                {filteredModules.slice(0, 5).map((mod) => (
-                  <div
-                    key={mod.id}
-                    className="flex items-center justify-between px-3 py-2 text-xs text-slate-400 rounded-lg bg-slate-950/40"
-                  >
-                    <div>
-                      <span className="text-slate-200 font-medium">{mod.name}</span>
-                      <span className="text-slate-500 ml-2">({mod.category})</span>
+                {filteredModules.slice(0, 6).map((mod) => {
+                  const entitled = isModuleEntitled(mod.code);
+                  const enabled = isModuleEnabled(mod.code);
+                  return (
+                    <div
+                      key={mod.id}
+                      onClick={() => {
+                        onNavigate('modules');
+                        onClose();
+                      }}
+                      className="flex items-center justify-between px-3 py-2 text-xs text-slate-300 rounded-lg bg-slate-950/40 hover:bg-slate-800 cursor-pointer transition-colors"
+                    >
+                      <div>
+                        <span className="text-slate-200 font-medium">{mod.name}</span>
+                        <span className="text-slate-500 ml-2">({mod.category})</span>
+                        <div className="text-[10px] font-mono text-slate-500 mt-0.5">{mod.code}</div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {mod.is_core ? (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/40">
+                            Core
+                          </span>
+                        ) : !entitled ? (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800/40">
+                            Unlicensed
+                          </span>
+                        ) : enabled ? (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/40">
+                            Enabled
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                            Disabled
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-[10px] font-mono text-slate-500">{mod.code}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

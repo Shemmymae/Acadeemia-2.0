@@ -166,6 +166,9 @@ export interface PackageLimits {
   max_campuses: number;
   max_staff: number;
   storage_gb: number;
+  max_administrators?: number;
+  ai_tokens_monthly?: number;
+  max_monthly_messages?: number;
 }
 
 export interface Package {
@@ -449,6 +452,159 @@ export interface AuditLogEntry {
   details: Record<string, unknown>;
   ip_address?: string;
   created_at: string;
+}
+
+// ==============================================================================
+// ADMISSIONS & APPLICANT MANAGEMENT DOMAIN (PHASE 4C)
+// ==============================================================================
+
+export type InquiryStatus = 'new' | 'contacted' | 'qualified' | 'converted' | 'closed';
+
+export type ApplicantStatus =
+  | 'draft'
+  | 'submitted'
+  | 'under_review'
+  | 'accepted'
+  | 'waitlisted'
+  | 'rejected'
+  | 'withdrawn'
+  | 'converted';
+
+export type ApplicationStatus =
+  | 'draft'
+  | 'submitted'
+  | 'under_review'
+  | 'accepted'
+  | 'waitlisted'
+  | 'rejected'
+  | 'withdrawn'
+  | 'converted';
+
+export interface AdmissionInquiry {
+  id: string;
+  institution_id: string;
+  campus_id?: string | null;
+  academic_year_id?: string | null;
+  interested_grade_id?: string | null;
+  inquiry_number: string;
+  prospective_student_name: string;
+  prospective_student_date_of_birth?: string | null;
+  guardian_name: string;
+  guardian_email?: string | null;
+  guardian_phone: string;
+  source: string;
+  notes?: string | null;
+  status: InquiryStatus;
+  created_by?: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined relation metadata
+  campus?: Campus;
+  academic_year?: AcademicYear;
+  interested_grade?: AcademicGrade;
+}
+
+export interface AdmissionApplicant {
+  id: string;
+  institution_id: string;
+  campus_id?: string | null;
+  applicant_number: string;
+  inquiry_id?: string | null;
+  first_name: string;
+  middle_name?: string | null;
+  last_name: string;
+  preferred_name?: string | null;
+  date_of_birth: string;
+  gender?: string | null;
+  nationality?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  previous_school?: string | null;
+  notes?: string | null;
+  status: ApplicantStatus;
+  created_at: string;
+  updated_at: string;
+  // Joined relation metadata
+  campus?: Campus;
+  inquiry?: AdmissionInquiry;
+  guardians?: AdmissionApplicantGuardian[];
+  applications?: AdmissionApplication[];
+}
+
+export interface AdmissionApplicantGuardian {
+  id: string;
+  institution_id: string;
+  applicant_id: string;
+  guardian_id: string;
+  relationship: string;
+  is_primary: boolean;
+  is_emergency_contact: boolean;
+  can_pick_up: boolean;
+  receives_billing_notifications: boolean;
+  created_at: string;
+  // Joined relation metadata
+  guardian?: Guardian;
+}
+
+export interface AdmissionApplication {
+  id: string;
+  institution_id: string;
+  applicant_id: string;
+  academic_year_id: string;
+  campus_id: string;
+  grade_id: string;
+  class_id?: string | null;
+  application_number: string;
+  application_date: string;
+  status: ApplicationStatus;
+  submitted_at?: string | null;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+  decision_at?: string | null;
+  decided_by?: string | null;
+  decision_reason?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joined relation metadata
+  applicant?: AdmissionApplicant;
+  academic_year?: AcademicYear;
+  campus?: Campus;
+  grade?: AcademicGrade;
+  class?: AcademicClass;
+}
+
+export interface AdmissionConversion {
+  id: string;
+  institution_id: string;
+  applicant_id: string;
+  application_id: string;
+  student_id: string;
+  converted_at: string;
+  converted_by?: string | null;
+}
+
+export interface DuplicateApplicantMatch {
+  applicant_id: string;
+  applicant_number: string;
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
+  status: string;
+  match_type: string;
+}
+
+export interface AdmissionStats {
+  totalInquiries: number;
+  newInquiries: number;
+  totalApplicants: number;
+  submittedApplications: number;
+  underReviewApplications: number;
+  acceptedApplications: number;
+  waitlistedApplications: number;
+  rejectedApplications: number;
+  convertedStudents: number;
 }
 
 export interface AIInsight {

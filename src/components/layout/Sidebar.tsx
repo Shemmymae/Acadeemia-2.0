@@ -18,7 +18,8 @@ import {
   ChevronDown,
   UserCheck,
   Shield,
-  HeartHandshake
+  HeartHandshake,
+  UserPlus
 } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
 import { useModules } from '../../context/ModuleContext';
@@ -42,7 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
 }) => {
   const { mode, activeInstitution, activeCampus, accessibleCampuses, selectCampus } = useTenant();
-  const { isModuleEnabled } = useModules();
+  const { isModuleAccessible, isModuleEnabled } = useModules();
   const { authUser, appProfile, isSandboxMode } = useAuth();
 
   const handleNavClick = (view: string) => {
@@ -255,7 +256,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {!isCollapsed && <span>Executive Dashboard</span>}
                 </button>
 
-                {isModuleEnabled('student_management') && (
+                {isModuleAccessible('student_management') && (
                   <button
                     onClick={() => handleNavClick('students')}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
@@ -270,7 +271,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 )}
 
-                {isModuleEnabled('academics') && (
+                {isModuleAccessible('academics') && (
                   <button
                     onClick={() => handleNavClick('academics')}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
@@ -282,6 +283,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   >
                     <BookOpen className="w-4 h-4 shrink-0" />
                     {!isCollapsed && <span>Academic Structure</span>}
+                  </button>
+                )}
+
+                {isModuleAccessible('admissions') && (
+                  <button
+                    onClick={() => handleNavClick('admissions')}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
+                      currentView === 'admissions'
+                        ? 'bg-indigo-600 text-white font-semibold'
+                        : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'
+                    }`}
+                    title="Admissions & Applicant Management"
+                  >
+                    <UserPlus className="w-4 h-4 shrink-0" />
+                    {!isCollapsed && <span>Admissions & Applicants</span>}
                   </button>
                 )}
 
@@ -333,7 +349,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {!isCollapsed && <span>Staff & User Roles</span>}
                 </button>
 
-                {isModuleEnabled('fees_collection') && (
+                {isModuleAccessible('fees_collection') && (
                   <button
                     onClick={() => handleNavClick('finance')}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
@@ -348,7 +364,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 )}
 
-                {isModuleEnabled('human_resources') && (
+                {isModuleAccessible('human_resources') && (
                   <button
                     onClick={() => handleNavClick('hr')}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
@@ -385,7 +401,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 )}
 
-                {isModuleEnabled('institution_website') && (
+                {isModuleAccessible('institution_website') && (
                   <button
                     onClick={() => handleNavClick('website')}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
@@ -400,7 +416,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </button>
                 )}
 
-                {isModuleEnabled('ai_intelligence') && (
+                {isModuleAccessible('ai_intelligence') && (
                   <button
                     onClick={() => handleNavClick('ai')}
                     className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer ${

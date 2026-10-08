@@ -12,6 +12,7 @@ import {
   Layers,
   Globe,
   RefreshCw,
+  UserPlus,
 } from 'lucide-react';
 import { useTenant } from '../../context/TenantContext';
 import { useModules } from '../../context/ModuleContext';
@@ -32,7 +33,7 @@ export const InstitutionDashboardView: React.FC<InstitutionDashboardViewProps> =
   onPreviewWebsite,
 }) => {
   const { activeInstitution, activeCampus, campuses, activeAcademicYear, activeAcademicTerm } = useTenant();
-  const { subscription, isModuleEnabled } = useModules();
+  const { subscription, isModuleEnabled, isModuleAccessible } = useModules();
 
   const [students, setStudents] = useState<Student[]>([]);
   const [staff, setStaff] = useState<HRStaff[]>([]);
@@ -120,6 +121,16 @@ export const InstitutionDashboardView: React.FC<InstitutionDashboardViewProps> =
           </div>
 
           <div className="flex flex-col sm:flex-row gap-2.5 shrink-0">
+            {isModuleAccessible('admissions') && (
+              <Button
+                size="sm"
+                variant="outline"
+                icon={<UserPlus className="w-4 h-4" />}
+                onClick={() => onNavigate('admissions')}
+              >
+                Admissions
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"

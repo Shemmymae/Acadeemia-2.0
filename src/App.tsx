@@ -27,6 +27,7 @@ import { PlatformAuditView } from './views/platform/PlatformAuditView';
 import { InstitutionDashboardView } from './views/institution/InstitutionDashboardView';
 import { StudentManagementView } from './views/institution/StudentManagementView';
 import { AcademicStructureView } from './views/institution/AcademicStructureView';
+import { AdmissionsView } from './views/institution/AdmissionsView';
 import { FinanceBillingView } from './views/institution/FinanceBillingView';
 import { HumanResourcesView } from './views/institution/HumanResourcesView';
 import { ModuleRegistryView } from './views/institution/ModuleRegistryView';
@@ -36,6 +37,7 @@ import { InstitutionSettingsView } from './views/institution/InstitutionSettings
 import { CampusesManagementView } from './views/institution/CampusesManagementView';
 import { InstitutionUsersView } from './views/institution/InstitutionUsersView';
 import { GuardiansManagementView } from './views/institution/GuardiansManagementView';
+import { ModuleAccessGuard } from './components/ui/ModuleAccessGuard';
 
 const AppShell: React.FC = () => {
   const { mode, setMode, selectInstitution, activeInstitution } = useTenant();
@@ -64,6 +66,7 @@ const AppShell: React.FC = () => {
         case 'dashboard': return 'Executive Dashboard';
         case 'students': return 'Student Information System';
         case 'academics': return 'Academic Structure';
+        case 'admissions': return 'Admissions & Applicant Management';
         case 'campuses': return 'Campuses & Branches';
         case 'guardians': return 'Guardians & Families';
         case 'institution-users': return 'Staff & User Roles';
@@ -148,18 +151,45 @@ const AppShell: React.FC = () => {
                   onPreviewWebsite={() => setSchoolModalOpen(true)}
                 />
               )}
-              {currentView === 'students' && <StudentManagementView />}
-              {currentView === 'academics' && <AcademicStructureView />}
+              {currentView === 'students' && (
+                <ModuleAccessGuard moduleCode="student_management" onNavigateToRegistry={() => setCurrentView('modules')}>
+                  <StudentManagementView />
+                </ModuleAccessGuard>
+              )}
+              {currentView === 'academics' && (
+                <ModuleAccessGuard moduleCode="academics" onNavigateToRegistry={() => setCurrentView('modules')}>
+                  <AcademicStructureView />
+                </ModuleAccessGuard>
+              )}
+              {currentView === 'admissions' && (
+                <ModuleAccessGuard moduleCode="admissions" onNavigateToRegistry={() => setCurrentView('modules')}>
+                  <AdmissionsView />
+                </ModuleAccessGuard>
+              )}
               {currentView === 'campuses' && <CampusesManagementView />}
               {currentView === 'guardians' && <GuardiansManagementView />}
               {currentView === 'institution-users' && <InstitutionUsersView />}
-              {currentView === 'finance' && <FinanceBillingView />}
-              {currentView === 'hr' && <HumanResourcesView />}
+              {currentView === 'finance' && (
+                <ModuleAccessGuard moduleCode="fees_collection" onNavigateToRegistry={() => setCurrentView('modules')}>
+                  <FinanceBillingView />
+                </ModuleAccessGuard>
+              )}
+              {currentView === 'hr' && (
+                <ModuleAccessGuard moduleCode="human_resources" onNavigateToRegistry={() => setCurrentView('modules')}>
+                  <HumanResourcesView />
+                </ModuleAccessGuard>
+              )}
               {currentView === 'modules' && <ModuleRegistryView />}
               {currentView === 'website' && (
-                <InstitutionWebsiteCMSView onPreviewWebsite={() => setSchoolModalOpen(true)} />
+                <ModuleAccessGuard moduleCode="institution_website" onNavigateToRegistry={() => setCurrentView('modules')}>
+                  <InstitutionWebsiteCMSView onPreviewWebsite={() => setSchoolModalOpen(true)} />
+                </ModuleAccessGuard>
               )}
-              {currentView === 'ai' && <AIIntelligenceHubView />}
+              {currentView === 'ai' && (
+                <ModuleAccessGuard moduleCode="ai_intelligence" onNavigateToRegistry={() => setCurrentView('modules')}>
+                  <AIIntelligenceHubView />
+                </ModuleAccessGuard>
+              )}
               {currentView === 'settings' && <InstitutionSettingsView />}
             </>
           )}

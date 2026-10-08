@@ -55,7 +55,7 @@ export const INSTITUTION_ROLES_CONFIG: Record<InstitutionRole, { label: string; 
     defaultPermissions: [
       'students.read', 'students.write', 'students.export',
       'academics.manage', 'academics.view',
-      'admissions.manage', 'admissions.review',
+      'admissions.manage', 'admissions.review', 'admissions.decide', 'admissions.convert', 'admissions.create', 'admissions.update', 'admissions.view',
       'attendance.mark', 'attendance.view',
       'exams.create', 'exams.grade', 'exams.publish',
       'hr.manage', 'hr.leave',
@@ -71,6 +71,7 @@ export const INSTITUTION_ROLES_CONFIG: Record<InstitutionRole, { label: string; 
     defaultPermissions: [
       'students.read', 'students.write', 'students.export',
       'academics.manage', 'academics.view',
+      'admissions.view', 'admissions.review', 'admissions.decide',
       'attendance.view', 'attendance.reports',
       'exams.grade', 'exams.publish',
       'hr.leave',
@@ -84,7 +85,8 @@ export const INSTITUTION_ROLES_CONFIG: Record<InstitutionRole, { label: string; 
     defaultPermissions: [
       'students.read', 'students.write',
       'academics.view', 'attendance.view',
-      'admissions.manage', 'comms.broadcast', 'events.manage'
+      'admissions.manage', 'admissions.create', 'admissions.update', 'admissions.view', 'admissions.convert',
+      'comms.broadcast', 'events.manage'
     ],
   },
   teacher: {
@@ -167,7 +169,7 @@ export const INSTITUTION_ROLES_CONFIG: Record<InstitutionRole, { label: string; 
     description: 'First point of institutional contact handling visitor sign-ins, dispatch, and general parent inquiries.',
     defaultPermissions: [
       'front_office.visitors', 'front_office.dispatch',
-      'admissions.review', 'students.read'
+      'admissions.view', 'admissions.create', 'admissions.review', 'students.read'
     ],
   },
   custom_role: {
